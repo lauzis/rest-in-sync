@@ -12,6 +12,9 @@ class Rest_In_Sync_Settings {
 	const OPTION_USERNAME       = 'rest_in_sync_username';
 	const OPTION_APP_PASSWORD   = 'rest_in_sync_app_password';
 	const OPTION_ENABLE_LOGGING = 'rest_in_sync_enable_logging';
+	const OPTION_POST_TYPES     = 'rest_in_sync_post_types_to_sync';
+
+	const DEFAULT_POST_TYPES = array( 'post', 'page' );
 
 	public function __construct() {
 		add_action( 'carbon_fields_register_fields', array( $this, 'register_fields' ) );
@@ -57,6 +60,11 @@ class Rest_In_Sync_Settings {
 
 				\Carbon_Fields\Field\Field::make( 'checkbox', self::OPTION_ENABLE_LOGGING, __( 'Enable logging', 'rest-in-sync' ) )
 					->set_help_text( __( 'Write sync and connection test activity to daily log files, viewable on the Logs page.', 'rest-in-sync' ) ),
+
+				\Carbon_Fields\Field\Field::make( 'set', self::OPTION_POST_TYPES, __( 'Post Types to Sync', 'rest-in-sync' ) )
+					->set_options( array( __CLASS__, 'get_available_post_types' ) )
+					->set_default_value( self::DEFAULT_POST_TYPES )
+					->set_help_text( __( 'Choose which post types should be checked and validated via the REST API.', 'rest-in-sync' ) ),
 			) );
 	}
 
@@ -97,6 +105,33 @@ class Rest_In_Sync_Settings {
 
 	public static function logging_enabled() {
 		return (bool) self::get_option( self::OPTION_ENABLE_LOGGING );
+	}
+
+	public static function get_post_types_to_sync() {
+		$post_types = self::get_option( self::OPTION_POST_TYPES );
+
+		if ( empty( $post_types ) || ! is_array( $post_types ) ) {
+			return self::DEFAULT_POST_TYPES;
+		}
+
+		return $post_types;
+	}
+
+	/**
+	 * Returns the registered post types eligible for syncing (those exposed via the REST API),
+	 * keyed by post type name with their singular label as the value.
+	 *
+	 * @return array<string, string>
+	 */
+	public static function get_available_post_types() {
+		$post_types = get_post_types( array( 'show_in_rest' => true ), 'objects' );
+
+		$options = array();
+		foreach ( $post_types as $post_type ) {
+			$options[ $post_type->name ] = $post_type->labels->singular_name;
+		}
+
+		return $options;
 	}
 
 	private static function get_option( $name ) {

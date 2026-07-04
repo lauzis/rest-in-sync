@@ -11,13 +11,17 @@ The plugin registers a top-level **REST in Sync** menu with the following pages:
 | Sync | Placeholder — sync tooling is not implemented yet. |
 | Help | Explains how the plugin connects to the live site via the REST API. |
 | Logs | Shows daily log files of sync and connection test activity, with a file selector and a "Clear all logs" button. |
-| Settings | Carbon Fields powered form to configure the remote site connection, with a "Test Connection" button and an "Enable logging" toggle. |
+| Settings | Carbon Fields powered form to configure the remote site connection, which post types to sync, with a "Test Connection" button and an "Enable logging" toggle. |
 
 ## Connecting to a live site
 
 The Settings page collects the live site's URL, a WordPress username, and an [Application Password](https://make.wordpress.org/core/2020/11/05/application-passwords-integration-guide/) for that user. Requests to the remote site are authenticated with HTTP Basic Auth using those credentials.
 
-The **Test Connection** button calls the remote site's REST API (`/wp-json/wp/v2/posts` and `/wp-json/wp/v2/pages`) and displays the 10 most recently updated posts/pages, or an error if the site is unreachable or the credentials are invalid.
+The **Test Connection** button calls the remote site's REST API for each selected post type's REST base route (e.g. `/wp-json/wp/v2/posts`, `/wp-json/wp/v2/pages`) and displays the 10 most recently updated items, or an error if the site is unreachable or the credentials are invalid.
+
+## Post types to sync
+
+The **Post Types to Sync** field on the Settings page lists every post type registered on this site that supports the REST API, so you can choose which ones get checked and validated. Posts and Pages are checked by default.
 
 ## Logging
 

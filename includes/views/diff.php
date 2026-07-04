@@ -7,8 +7,9 @@ $diff_id     = isset( $_GET['diff_id'] ) ? sanitize_text_field( wp_unslash( $_GE
 $nonce       = isset( $_GET['_wpnonce'] ) ? sanitize_text_field( wp_unslash( $_GET['_wpnonce'] ) ) : '';
 $nonce_valid = $diff_id && wp_verify_nonce( $nonce, Rest_In_Sync_Admin_Menu::DIFF_NONCE_ACTION . '_' . $diff_id );
 
-$post      = null;
-$diff_data = null;
+$post       = null;
+$comparison = null;
+$error      = '';
 
 if ( $nonce_valid ) {
 	$matches = get_posts( array(
@@ -21,89 +22,119 @@ if ( $nonce_valid ) {
 
 	$post = $matches ? $matches[0] : null;
 
-	$file_path = REST_IN_SYNC_DIFF_PATH . $diff_id . '.json';
+	if ( $post ) {
+		$result = ( new Rest_In_Sync_Sync_Checker() )->get_comparison( $post );
 
-	if ( $post && file_exists( $file_path ) ) {
-		$decoded = json_decode( (string) file_get_contents( $file_path ), true );
-
-		if ( is_array( $decoded ) && isset( $decoded['diff'] ) && is_array( $decoded['diff'] ) ) {
-			$diff_data = $decoded;
+		if ( is_wp_error( $result ) ) {
+			$error = $result->get_error_message();
+		} else {
+			$comparison = $result;
 		}
 	}
 }
 
-$field_labels = array(
-	'title'   => __( 'Title', 'rest-in-sync' ),
-	'content' => __( 'Content', 'rest-in-sync' ),
-	'excerpt' => __( 'Excerpt', 'rest-in-sync' ),
-	'status'  => __( 'Status', 'rest-in-sync' ),
-);
+if ( $post ) {
+	wp_localize_script( 'rest-in-sync-details', 'risDetails', array(
+		'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+		'nonce'   => wp_create_nonce( Rest_In_Sync_Ajax::NONCE_ACTION_DETAILS ),
+		'postId'  => $post->ID,
+		'i18n'    => array(
+			'error'            => __( 'Something went wrong. Please try again.', 'rest-in-sync' ),
+			'noFieldsSelected' => __( 'Select at least one field to push.', 'rest-in-sync' ),
+			'pushSuccess'      => __( 'Selected fields were pushed to the remote site.', 'rest-in-sync' ),
+			'settingSaved'     => __( 'Setting saved.', 'rest-in-sync' ),
+		),
+	) );
+}
 ?>
 <div class="wrap">
-	<h1 class="wp-heading-inline"><?php esc_html_e( 'Sync Diff', 'rest-in-sync' ); ?></h1>
+	<h1 class="wp-heading-inline"><?php esc_html_e( 'Sync Details', 'rest-in-sync' ); ?></h1>
 	<hr class="wp-header-end">
 
-	<?php if ( ! $nonce_valid ) : ?>
+	<?php if ( ! $nonce_valid || ! $post ) : ?>
 		<div class="notice notice-error inline" style="margin-top:20px;">
-			<p><?php esc_html_e( 'This diff link is invalid or has expired.', 'rest-in-sync' ); ?></p>
+			<p><?php esc_html_e( 'This details link is invalid or has expired.', 'rest-in-sync' ); ?></p>
 		</div>
-	<?php elseif ( ! $diff_data ) : ?>
+	<?php elseif ( $error ) : ?>
 		<div class="notice notice-warning inline" style="margin-top:20px;">
-			<p><?php esc_html_e( 'This diff could not be found. The post may have been resynced or the diff file may have been deleted.', 'rest-in-sync' ); ?></p>
+			<p><?php echo esc_html( $error ); ?></p>
 		</div>
 	<?php else : ?>
 		<p>
 			<strong><?php esc_html_e( 'Post:', 'rest-in-sync' ); ?></strong>
 			<?php echo esc_html( get_the_title( $post ) ); ?>
 			(<?php echo esc_html( $post->post_type ); ?>)
-			<?php if ( ! empty( $diff_data['checked_at'] ) ) : ?>
-				&mdash;
-				<?php
-				printf(
-					/* translators: %s: date the diff was recorded. */
-					esc_html__( 'checked %s', 'rest-in-sync' ),
-					esc_html( date_i18n( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), strtotime( $diff_data['checked_at'] ) ) )
-				);
-				?>
-			<?php endif; ?>
 		</p>
 
-		<table class="wp-list-table widefat fixed striped" style="margin-top:10px;">
+		<p class="ris-controls">
+			<button type="button" id="ris-select-all" class="button"><?php esc_html_e( 'Select All', 'rest-in-sync' ); ?></button>
+			<button type="button" id="ris-select-none" class="button"><?php esc_html_e( 'Select None', 'rest-in-sync' ); ?></button>
+			<button type="button" id="ris-select-default" class="button"><?php esc_html_e( 'Select Default', 'rest-in-sync' ); ?></button>
+			&nbsp;&nbsp;
+			<label>
+				<input type="checkbox" id="ris-show-equal">
+				<?php esc_html_e( 'Show fields with equal values', 'rest-in-sync' ); ?>
+			</label>
+		</p>
+
+		<table class="wp-list-table widefat fixed striped" id="ris-fields-table" style="margin-top:10px;">
 			<thead>
 				<tr>
-					<th style="width:20%;"><?php esc_html_e( 'Field', 'rest-in-sync' ); ?></th>
-					<th style="width:40%;"><?php esc_html_e( 'Local', 'rest-in-sync' ); ?></th>
-					<th style="width:40%;"><?php esc_html_e( 'Remote', 'rest-in-sync' ); ?></th>
+					<th style="width:4%;"><?php esc_html_e( 'Sync', 'rest-in-sync' ); ?></th>
+					<th style="width:16%;"><?php esc_html_e( 'Field', 'rest-in-sync' ); ?></th>
+					<th style="width:30%;"><?php esc_html_e( 'Local', 'rest-in-sync' ); ?></th>
+					<th style="width:30%;"><?php esc_html_e( 'Remote', 'rest-in-sync' ); ?></th>
+					<th style="width:20%;"><?php esc_html_e( 'Field Settings', 'rest-in-sync' ); ?></th>
 				</tr>
 			</thead>
 			<tbody>
-				<?php
-				foreach ( $field_labels as $field => $label ) :
-					if ( ! isset( $diff_data['diff'][ $field ] ) ) {
-						continue;
-					}
-					$values = $diff_data['diff'][ $field ];
+				<?php foreach ( $comparison['rows'] as $row ) :
+					$field_settings  = Rest_In_Sync_Field_Settings::get_for_field( $row['key'] );
+					$exclude_sync    = ! empty( $field_settings[ Rest_In_Sync_Field_Settings::SETTING_EXCLUDE_FROM_SYNC ] );
+					$exclude_diff    = ! empty( $field_settings[ Rest_In_Sync_Field_Settings::SETTING_EXCLUDE_FROM_DIFF ] );
 					?>
-					<tr>
-						<td><strong><?php echo esc_html( $label ); ?></strong></td>
-						<td><pre style="white-space:pre-wrap;word-break:break-word;margin:0;"><?php echo esc_html( (string) $values['local'] ); ?></pre></td>
-						<td><pre style="white-space:pre-wrap;word-break:break-word;margin:0;"><?php echo esc_html( (string) $values['remote'] ); ?></pre></td>
+					<tr data-differs="<?php echo $row['differs'] ? '1' : '0'; ?>">
+						<td>
+							<input
+								type="checkbox"
+								class="ris-field-checkbox"
+								value="<?php echo esc_attr( $row['key'] ); ?>"
+								data-default-checked="<?php echo $exclude_sync ? '0' : '1'; ?>"
+								<?php checked( ! $exclude_sync ); ?>
+							>
+						</td>
+						<td>
+							<strong><?php echo esc_html( $row['label'] ); ?></strong>
+							<?php if ( 'meta' === $row['type'] ) : ?>
+								<br><code><?php esc_html_e( 'meta', 'rest-in-sync' ); ?></code>
+							<?php endif; ?>
+						</td>
+						<td><pre style="white-space:pre-wrap;word-break:break-word;margin:0;"><?php echo esc_html( (string) $row['local'] ); ?></pre></td>
+						<td><pre style="white-space:pre-wrap;word-break:break-word;margin:0;"><?php echo esc_html( (string) $row['remote'] ); ?></pre></td>
+						<td>
+							<button
+								type="button"
+								class="button ris-toggle<?php echo $exclude_sync ? ' button-primary' : ''; ?>"
+								data-field="<?php echo esc_attr( $row['key'] ); ?>"
+								data-setting="<?php echo esc_attr( Rest_In_Sync_Field_Settings::SETTING_EXCLUDE_FROM_SYNC ); ?>"
+								aria-pressed="<?php echo $exclude_sync ? 'true' : 'false'; ?>"
+							><?php esc_html_e( "Don't sync by default", 'rest-in-sync' ); ?></button>
+							<button
+								type="button"
+								class="button ris-toggle<?php echo $exclude_diff ? ' button-primary' : ''; ?>"
+								data-field="<?php echo esc_attr( $row['key'] ); ?>"
+								data-setting="<?php echo esc_attr( Rest_In_Sync_Field_Settings::SETTING_EXCLUDE_FROM_DIFF ); ?>"
+								aria-pressed="<?php echo $exclude_diff ? 'true' : 'false'; ?>"
+							><?php esc_html_e( "Don't use in diff", 'rest-in-sync' ); ?></button>
+						</td>
 					</tr>
 				<?php endforeach; ?>
-
-				<?php if ( ! empty( $diff_data['diff']['meta'] ) && is_array( $diff_data['diff']['meta'] ) ) : ?>
-					<?php foreach ( $diff_data['diff']['meta'] as $meta_key => $values ) : ?>
-						<tr>
-							<td>
-								<strong><?php esc_html_e( 'Meta:', 'rest-in-sync' ); ?></strong>
-								<code><?php echo esc_html( $meta_key ); ?></code>
-							</td>
-							<td><pre style="white-space:pre-wrap;word-break:break-word;margin:0;"><?php echo esc_html( (string) $values['local'] ); ?></pre></td>
-							<td><pre style="white-space:pre-wrap;word-break:break-word;margin:0;"><?php echo esc_html( (string) $values['remote'] ); ?></pre></td>
-						</tr>
-					<?php endforeach; ?>
-				<?php endif; ?>
 			</tbody>
 		</table>
+
+		<p style="margin-top:15px;">
+			<button type="button" id="ris-push" class="button button-primary"><?php esc_html_e( 'Push to Remote', 'rest-in-sync' ); ?></button>
+			<span id="ris-push-spinner" class="spinner" style="float:none;"></span>
+		</p>
 	<?php endif; ?>
 </div>

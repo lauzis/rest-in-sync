@@ -45,6 +45,16 @@ class Rest_In_Sync_Admin_Menu {
 			REST_IN_SYNC_VERSION,
 			true
 		);
+
+		if ( strpos( (string) $hook_suffix, self::MENU_SLUG . '-diff' ) !== false ) {
+			wp_enqueue_script(
+				'rest-in-sync-details',
+				REST_IN_SYNC_URL . 'assets/js/details.js',
+				array( 'jquery', 'rest-in-sync-toast' ),
+				REST_IN_SYNC_VERSION,
+				true
+			);
+		}
 	}
 
 	public function register_menu() {

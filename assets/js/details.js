@@ -8,7 +8,8 @@
 			return;
 		}
 
-		var $showEqual = $( '#ris-show-equal' );
+		var $showEqual   = $( '#ris-show-equal' );
+		var $fieldFilter = $( '#ris-field-filter' );
 
 		function showToast( message, type ) {
 			if ( window.RestInSyncToast ) {
@@ -16,20 +17,23 @@
 			}
 		}
 
-		function applyEqualFilter() {
-			var show = $showEqual.is( ':checked' );
+		function applyFilters() {
+			var showEqual = $showEqual.is( ':checked' );
+			var needle    = $.trim( $fieldFilter.val() ).toLowerCase();
 
 			$table.find( 'tbody tr' ).each( function () {
 				var $row = $( this );
 
-				if ( ! $row.data( 'differs' ) ) {
-					$row.toggle( show );
-				}
+				var matchesEqualFilter = showEqual || $row.data( 'differs' );
+				var matchesNameFilter  = ! needle || String( $row.data( 'field-name' ) ).indexOf( needle ) !== -1;
+
+				$row.toggle( matchesEqualFilter && matchesNameFilter );
 			} );
 		}
 
-		$showEqual.on( 'change', applyEqualFilter );
-		applyEqualFilter();
+		$showEqual.on( 'change', applyFilters );
+		$fieldFilter.on( 'input', applyFilters );
+		applyFilters();
 
 		$( '#ris-select-all' ).on( 'click', function () {
 			$table.find( '.ris-field-checkbox' ).prop( 'checked', true );
@@ -78,6 +82,39 @@
 				showToast( risDetails.i18n.error, 'error' );
 			} ).always( function () {
 				$btn.prop( 'disabled', false );
+			} );
+		} );
+
+		$( '#ris-resync' ).on( 'click', function () {
+			var $btn     = $( this );
+			var $spinner = $( '#ris-resync-spinner' );
+
+			$btn.prop( 'disabled', true ).text( risDetails.i18n.resyncing );
+			$spinner.addClass( 'is-active' );
+
+			$.post( risDetails.ajaxUrl, {
+				action: 'rest_in_sync_check_now',
+				nonce: risDetails.resyncNonce,
+				post_id: risDetails.postId
+			} ).done( function ( response ) {
+				var success = response && response.success;
+				var message = ( response && response.data && response.data.message ) || ( success ? '' : risDetails.i18n.error );
+
+				if ( message ) {
+					showToast( message, success ? 'success' : 'error' );
+				}
+
+				if ( success ) {
+					window.location.reload();
+					return;
+				}
+
+				$btn.prop( 'disabled', false ).text( risDetails.i18n.resync );
+				$spinner.removeClass( 'is-active' );
+			} ).fail( function () {
+				showToast( risDetails.i18n.error, 'error' );
+				$btn.prop( 'disabled', false ).text( risDetails.i18n.resync );
+				$spinner.removeClass( 'is-active' );
 			} );
 		} );
 

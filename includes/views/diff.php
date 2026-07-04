@@ -35,18 +35,28 @@ if ( $nonce_valid ) {
 
 if ( $post ) {
 	wp_localize_script( 'rest-in-sync-details', 'risDetails', array(
-		'ajaxUrl' => admin_url( 'admin-ajax.php' ),
-		'nonce'   => wp_create_nonce( Rest_In_Sync_Ajax::NONCE_ACTION_DETAILS ),
-		'postId'  => $post->ID,
-		'i18n'    => array(
+		'ajaxUrl'      => admin_url( 'admin-ajax.php' ),
+		'nonce'        => wp_create_nonce( Rest_In_Sync_Ajax::NONCE_ACTION_DETAILS ),
+		'resyncNonce'  => wp_create_nonce( Rest_In_Sync_Ajax::NONCE_ACTION_SYNC ),
+		'postId'       => $post->ID,
+		'i18n'         => array(
 			'error'            => __( 'Something went wrong. Please try again.', 'rest-in-sync' ),
 			'noFieldsSelected' => __( 'Select at least one field to push.', 'rest-in-sync' ),
 			'pushSuccess'      => __( 'Selected fields were pushed to the remote site.', 'rest-in-sync' ),
 			'settingSaved'     => __( 'Setting saved.', 'rest-in-sync' ),
+			'resyncing'        => __( 'Checking…', 'rest-in-sync' ),
+			'resync'           => __( 'Resync Now', 'rest-in-sync' ),
 		),
 	) );
 }
 ?>
+<style>
+	.ris-diff-mark {
+		background: #fff2ac;
+		font-weight: 600;
+		border-radius: 2px;
+	}
+</style>
 <div class="wrap">
 	<h1 class="wp-heading-inline"><?php esc_html_e( 'Sync Details', 'rest-in-sync' ); ?></h1>
 	<hr class="wp-header-end">
@@ -64,6 +74,9 @@ if ( $post ) {
 			<strong><?php esc_html_e( 'Post:', 'rest-in-sync' ); ?></strong>
 			<?php echo esc_html( get_the_title( $post ) ); ?>
 			(<?php echo esc_html( $post->post_type ); ?>)
+			&nbsp;&nbsp;
+			<button type="button" id="ris-resync" class="button"><?php esc_html_e( 'Resync Now', 'rest-in-sync' ); ?></button>
+			<span id="ris-resync-spinner" class="spinner" style="float:none;"></span>
 		</p>
 
 		<p class="ris-controls">
@@ -74,6 +87,11 @@ if ( $post ) {
 			<label>
 				<input type="checkbox" id="ris-show-equal">
 				<?php esc_html_e( 'Show fields with equal values', 'rest-in-sync' ); ?>
+			</label>
+			&nbsp;&nbsp;
+			<label>
+				<?php esc_html_e( 'Filter by field name:', 'rest-in-sync' ); ?>
+				<input type="search" id="ris-field-filter" placeholder="<?php esc_attr_e( 'e.g. view_count', 'rest-in-sync' ); ?>">
 			</label>
 		</p>
 
@@ -92,8 +110,14 @@ if ( $post ) {
 					$field_settings  = Rest_In_Sync_Field_Settings::get_for_field( $row['key'] );
 					$exclude_sync    = ! empty( $field_settings[ Rest_In_Sync_Field_Settings::SETTING_EXCLUDE_FROM_SYNC ] );
 					$exclude_diff    = ! empty( $field_settings[ Rest_In_Sync_Field_Settings::SETTING_EXCLUDE_FROM_DIFF ] );
+
+					$remote_exposed = ! empty( $row['remote_exposed'] );
+					$highlightable  = $row['differs'] && $remote_exposed && 'field' === $row['type'] && in_array( $row['key'], array( 'title', 'content', 'excerpt' ), true );
+					$values         = $highlightable
+						? Rest_In_Sync_Diff_Renderer::render( $row['local'], $row['remote'] )
+						: array( 'local' => esc_html( (string) $row['local'] ), 'remote' => esc_html( (string) $row['remote'] ) );
 					?>
-					<tr data-differs="<?php echo $row['differs'] ? '1' : '0'; ?>">
+					<tr data-differs="<?php echo $row['differs'] ? '1' : '0'; ?>" data-field-name="<?php echo esc_attr( strtolower( $row['key'] ) ); ?>">
 						<td>
 							<input
 								type="checkbox"
@@ -108,9 +132,14 @@ if ( $post ) {
 							<?php if ( 'meta' === $row['type'] ) : ?>
 								<br><code><?php esc_html_e( 'meta', 'rest-in-sync' ); ?></code>
 							<?php endif; ?>
+							<?php if ( ! $remote_exposed ) : ?>
+								<br><span class="description" title="<?php esc_attr_e( 'This meta key isn\'t registered for REST access on the remote site, so we can\'t confirm whether it matches there.', 'rest-in-sync' ); ?>">
+									<?php esc_html_e( 'not exposed on remote', 'rest-in-sync' ); ?>
+								</span>
+							<?php endif; ?>
 						</td>
-						<td><pre style="white-space:pre-wrap;word-break:break-word;margin:0;"><?php echo esc_html( (string) $row['local'] ); ?></pre></td>
-						<td><pre style="white-space:pre-wrap;word-break:break-word;margin:0;"><?php echo esc_html( (string) $row['remote'] ); ?></pre></td>
+						<td><pre style="white-space:pre-wrap;word-break:break-word;margin:0;"><?php echo $values['local']; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- already escaped by Rest_In_Sync_Diff_Renderer::render() or esc_html() above. ?></pre></td>
+						<td><pre style="white-space:pre-wrap;word-break:break-word;margin:0;"><?php echo $remote_exposed ? $values['remote'] : ''; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- already escaped by Rest_In_Sync_Diff_Renderer::render() or esc_html() above. ?></pre></td>
 						<td>
 							<button
 								type="button"

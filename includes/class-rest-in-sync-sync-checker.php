@@ -23,6 +23,22 @@ class Rest_In_Sync_Sync_Checker {
 
 	const GUID_LOOKUP_MAX_PAGES = 5;
 
+	/**
+	 * Exposes the UUID meta via REST (both for reading it back from the remote
+	 * site during lookups, and so wp_remote_post() writes to it are accepted).
+	 * Runs on both ends since the same plugin is installed on the remote site.
+	 */
+	public static function register_meta_fields() {
+		register_meta( 'post', self::META_UUID, array(
+			'show_in_rest'  => true,
+			'single'        => true,
+			'type'          => 'string',
+			// Protected (underscore-prefixed) meta is REST-read-only by default;
+			// this is written by the sync connection's own authenticated user.
+			'auth_callback' => '__return_true',
+		) );
+	}
+
 	/** Cron callback entry point. */
 	public static function run() {
 		( new self() )->run_batch();
@@ -44,18 +60,22 @@ class Rest_In_Sync_Sync_Checker {
 		$remote_id = $this->get_or_find_remote_id( $post );
 
 		if ( ! $remote_id ) {
+			Rest_In_Sync_Logs::add_error( 'get_comparison', 'No matching post was found on the remote site.', array( 'post_id' => $post->ID ) );
+
 			return new WP_Error( 'rest_in_sync_no_remote_match', __( 'No matching post was found on the remote site.', 'rest-in-sync' ) );
 		}
 
 		$remote_post = $this->fetch_remote_post( $post->post_type, $remote_id );
 
 		if ( is_wp_error( $remote_post ) ) {
+			Rest_In_Sync_Logs::add_error( 'get_comparison', $remote_post->get_error_message(), array( 'post_id' => $post->ID, 'remote_id' => $remote_id ) );
+
 			return $remote_post;
 		}
 
 		return array(
 			'remote_id' => $remote_id,
-			'rows'      => $this->compare_all_fields( $post, $remote_post ),
+			'rows'      => $this->compare_all_fields( $post, $remote_post, $remote_id ),
 		);
 	}
 
@@ -70,8 +90,13 @@ class Rest_In_Sync_Sync_Checker {
 		$remote_id = $this->get_or_find_remote_id( $post );
 
 		if ( ! $remote_id ) {
+			Rest_In_Sync_Logs::add_error( 'push_to_remote', 'No matching post was found on the remote site.', array( 'post_id' => $post->ID ) );
+
 			return new WP_Error( 'rest_in_sync_no_remote_match', __( 'No matching post was found on the remote site.', 'rest-in-sync' ) );
 		}
+
+		$local_home  = home_url();
+		$remote_home = Rest_In_Sync_Settings::get_site_url();
 
 		$standard_fields = array( 'title', 'content', 'excerpt', 'status' );
 		$body            = array();
@@ -79,9 +104,10 @@ class Rest_In_Sync_Sync_Checker {
 
 		foreach ( $selected_keys as $key ) {
 			if ( in_array( $key, $standard_fields, true ) ) {
-				$body[ $key ] = 'title' === $key ? $post->post_title : ( 'content' === $key ? $post->post_content : ( 'excerpt' === $key ? $post->post_excerpt : $post->post_status ) );
+				$value = 'title' === $key ? $post->post_title : ( 'content' === $key ? $post->post_content : ( 'excerpt' === $key ? $post->post_excerpt : $post->post_status ) );
+				$body[ $key ] = 'status' === $key ? $value : $this->rewrite_home_url( $value, $local_home, $remote_home );
 			} else {
-				$meta[ $key ] = get_post_meta( $post->ID, $key, true );
+				$meta[ $key ] = $this->rewrite_home_url( get_post_meta( $post->ID, $key, true ), $local_home, $remote_home );
 			}
 		}
 
@@ -121,10 +147,31 @@ class Rest_In_Sync_Sync_Checker {
 
 			if ( $remote_id ) {
 				update_post_meta( $post->ID, self::META_REMOTE_ID, $remote_id );
+				$this->stamp_remote_uuid( $post, $remote_id );
 			}
 		}
 
 		return $remote_id;
+	}
+
+	/**
+	 * Writes this post's UUID onto the newly-matched remote post so future
+	 * lookups can match on UUID instead of relying on slug/guid, which can
+	 * drift (e.g. after a title change) or never have coincided at all.
+	 */
+	private function stamp_remote_uuid( WP_Post $post, $remote_id ) {
+		$uuid = get_post_meta( $post->ID, self::META_UUID, true );
+
+		if ( ! $uuid ) {
+			return;
+		}
+
+		$endpoint = $this->rest_endpoint( $this->get_rest_base( $post->post_type ) ) . '/' . $remote_id;
+		$response = $this->remote_post( $endpoint, array( 'meta' => array( self::META_UUID => $uuid ) ) );
+
+		if ( is_wp_error( $response ) ) {
+			Rest_In_Sync_Logs::add_error( 'stamp_remote_uuid', $response->get_error_message(), array( 'post_id' => $post->ID, 'remote_id' => $remote_id ) );
+		}
 	}
 
 	public function run_batch() {
@@ -197,7 +244,21 @@ class Rest_In_Sync_Sync_Checker {
 			$post_ids = array_merge( $post_ids, $due_for_resync );
 		}
 
-		return array_map( 'get_post', $post_ids );
+		/*
+		 * A post with no slug (typically a draft that's never been published)
+		 * can never be matched to a remote post by slug, and its guid is just a
+		 * local "?p=ID" placeholder that can't match a real remote guid either —
+		 * so it would only ever be reported as a false "out of sync" with no way
+		 * to resolve it, especially where several drafts share the same title.
+		 * Filtered here in PHP, not via a 'posts_where' hook, since get_posts()
+		 * suppresses query filters by default.
+		 */
+		return array_filter(
+			array_map( 'get_post', $post_ids ),
+			static function ( $post ) {
+				return '' !== $post->post_name;
+			}
+		);
 	}
 
 	private function check_post( WP_Post $post ) {
@@ -224,7 +285,7 @@ class Rest_In_Sync_Sync_Checker {
 			return;
 		}
 
-		$diff = $this->build_diff( $post, $remote_post );
+		$diff = $this->build_diff( $post, $remote_post, $remote_id );
 
 		if ( empty( $diff ) ) {
 			$this->finish_check( $post, self::STATUS_IN_SYNC );
@@ -290,28 +351,97 @@ class Rest_In_Sync_Sync_Checker {
 
 	private function find_remote_id( WP_Post $post ) {
 		$rest_base = $this->get_rest_base( $post->post_type );
+		$uuid      = get_post_meta( $post->ID, self::META_UUID, true );
+		$lang      = $this->get_post_language_code( $post );
 
-		$remote_id = $this->find_remote_id_by_slug( $rest_base, $post->post_name );
+		Rest_In_Sync_Logs::add_log( 'find_remote_id', 'Looking up remote post', array(
+			'post_id'   => $post->ID,
+			'post_type' => $post->post_type,
+			'rest_base' => $rest_base,
+			'slug'      => $post->post_name,
+			'guid'      => $post->guid,
+			'uuid'      => $uuid,
+			'lang'      => $lang,
+		) );
+
+		$remote_id = $this->find_remote_id_by_slug( $rest_base, $post->post_name, $lang );
 
 		if ( $remote_id ) {
 			return $remote_id;
 		}
 
-		return $this->find_remote_id_by_guid( $rest_base, $post->guid );
+		$remote_id = $this->find_remote_id_by_guid_or_uuid( $rest_base, $post->guid, $uuid, $lang );
+
+		if ( ! $remote_id ) {
+			Rest_In_Sync_Logs::add_log( 'find_remote_id', 'No remote post matched slug, GUID, or UUID', array(
+				'post_id'   => $post->ID,
+				'rest_base' => $rest_base,
+				'slug'      => $post->post_name,
+				'guid'      => $post->guid,
+				'uuid'      => $uuid,
+				'lang'      => $lang,
+			) );
+		}
+
+		return $remote_id;
 	}
 
-	private function find_remote_id_by_slug( $rest_base, $slug ) {
+	/**
+	 * Returns this post's WPML language code (e.g. "en", "lv"), or '' if WPML
+	 * isn't active or the post isn't managed by it. WPML's REST API integration
+	 * scopes collection queries (search-by-slug, list scans) to the site's
+	 * default language unless a "lang" query arg says otherwise, so without this
+	 * a translated post is invisible to those lookups even though it exists.
+	 */
+	private function get_post_language_code( WP_Post $post ) {
+		if ( ! defined( 'ICL_SITEPRESS_VERSION' ) ) {
+			return '';
+		}
+
+		$lang = apply_filters( 'wpml_element_language_code', null, array(
+			'element_id'   => $post->ID,
+			'element_type' => $post->post_type,
+		) );
+
+		return is_string( $lang ) ? $lang : '';
+	}
+
+	private function find_remote_id_by_slug( $rest_base, $slug, $lang = '' ) {
 		if ( '' === (string) $slug ) {
 			return 0;
 		}
 
-		$response = $this->remote_get( $this->rest_endpoint( $rest_base ), array(
+		$args = array(
 			'slug'    => $slug,
 			'context' => 'edit',
 			'_fields' => 'id,slug',
-		) );
+		);
 
-		if ( is_wp_error( $response ) || empty( $response[0]['id'] ) ) {
+		if ( '' !== (string) $lang ) {
+			$args['lang'] = $lang;
+		}
+
+		$endpoint = $this->rest_endpoint( $rest_base );
+		$response = $this->remote_get( $endpoint, $args );
+
+		if ( is_wp_error( $response ) ) {
+			Rest_In_Sync_Logs::add_error( 'find_remote_id_by_slug', $response->get_error_message(), array(
+				'endpoint' => $endpoint,
+				'slug'     => $slug,
+				'lang'     => $lang,
+			) );
+
+			return 0;
+		}
+
+		if ( empty( $response[0]['id'] ) ) {
+			Rest_In_Sync_Logs::add_log( 'find_remote_id_by_slug', 'No remote post found with matching slug', array(
+				'endpoint'      => $endpoint,
+				'slug'          => $slug,
+				'lang'          => $lang,
+				'results_count' => count( $response ),
+			) );
+
 			return 0;
 		}
 
@@ -319,28 +449,56 @@ class Rest_In_Sync_Sync_Checker {
 	}
 
 	/**
-	 * Falls back to scanning the remote post type's items for a matching GUID
-	 * when no post shares the local slug. Capped to a handful of pages so a
-	 * miss doesn't turn into an unbounded crawl of the remote site.
+	 * Falls back to scanning the remote post type's items for a matching UUID
+	 * or GUID when no post shares the local slug. Capped to a handful of pages
+	 * so a miss doesn't turn into an unbounded crawl of the remote site.
 	 */
-	private function find_remote_id_by_guid( $rest_base, $guid ) {
-		if ( '' === (string) $guid ) {
+	private function find_remote_id_by_guid_or_uuid( $rest_base, $guid, $uuid, $lang = '' ) {
+		if ( '' === (string) $guid && '' === (string) $uuid ) {
 			return 0;
 		}
 
+		$endpoint      = $this->rest_endpoint( $rest_base );
+		$pages_scanned = 0;
+		$entries_seen  = 0;
+
 		for ( $page = 1; $page <= self::GUID_LOOKUP_MAX_PAGES; $page++ ) {
-			$response = $this->remote_get( $this->rest_endpoint( $rest_base ), array(
+			$args = array(
 				'per_page' => 100,
 				'page'     => $page,
 				'context'  => 'edit',
-				'_fields'  => 'id,guid',
-			) );
+				'_fields'  => 'id,guid,meta',
+			);
 
-			if ( is_wp_error( $response ) || empty( $response ) ) {
+			if ( '' !== (string) $lang ) {
+				$args['lang'] = $lang;
+			}
+
+			$response = $this->remote_get( $endpoint, $args );
+
+			if ( is_wp_error( $response ) ) {
+				Rest_In_Sync_Logs::add_error( 'find_remote_id_by_guid_or_uuid', $response->get_error_message(), array(
+					'endpoint' => $endpoint,
+					'page'     => $page,
+				) );
+
 				break;
 			}
 
+			if ( empty( $response ) ) {
+				break;
+			}
+
+			$pages_scanned++;
+			$entries_seen += count( $response );
+
 			foreach ( $response as $entry ) {
+				$remote_uuid = isset( $entry['meta'][ self::META_UUID ] ) ? $entry['meta'][ self::META_UUID ] : '';
+
+				if ( '' !== (string) $uuid && $remote_uuid === $uuid ) {
+					return (int) $entry['id'];
+				}
+
 				$remote_guid = isset( $entry['guid']['rendered'] ) ? $entry['guid']['rendered'] : '';
 
 				if ( $remote_guid === $guid ) {
@@ -353,6 +511,15 @@ class Rest_In_Sync_Sync_Checker {
 			}
 		}
 
+		Rest_In_Sync_Logs::add_log( 'find_remote_id_by_guid_or_uuid', 'No remote post matched GUID or UUID', array(
+			'endpoint'      => $endpoint,
+			'guid'          => $guid,
+			'uuid'          => $uuid,
+			'lang'          => $lang,
+			'pages_scanned' => $pages_scanned,
+			'entries_seen'  => $entries_seen,
+		) );
+
 		return 0;
 	}
 
@@ -363,16 +530,46 @@ class Rest_In_Sync_Sync_Checker {
 	}
 
 	/**
+	 * Fetches every meta key on the matched remote post via this plugin's own
+	 * '/rest-in-sync/v1/meta/{id}' route, bypassing the standard REST API's
+	 * show_in_rest restriction entirely. Requires the remote to be running a
+	 * plugin version that registers this route; on a 404 (older remote, or a
+	 * genuinely plain WordPress install) this degrades gracefully to an empty
+	 * array, same as if the route never existed.
+	 *
+	 * @return array meta_key => value
+	 */
+	private function fetch_remote_all_meta( $remote_id ) {
+		$endpoint = trailingslashit( trim( (string) Rest_In_Sync_Settings::get_site_url() ) ) . 'wp-json/rest-in-sync/v1/meta/' . $remote_id;
+		$response = $this->remote_get( $endpoint );
+
+		if ( is_wp_error( $response ) ) {
+			Rest_In_Sync_Logs::add_log( 'fetch_remote_all_meta', $response->get_error_message(), array( 'remote_id' => $remote_id ) );
+
+			return array();
+		}
+
+		return is_array( $response ) ? $response : array();
+	}
+
+	/**
 	 * Compares local post fields and meta against the remote post, returning
 	 * only the fields that differ and aren't flagged exclude_from_diff.
 	 *
+	 * Meta keys the remote doesn't expose at all ('remote_exposed' => false)
+	 * are never counted here — compare_all_fields() includes them for the
+	 * Details view's benefit, but we have no actual remote value to compare
+	 * against, so treating them as "out of sync" would flag nearly every post
+	 * on a site where most custom fields aren't REST-registered and the
+	 * remote isn't running a plugin version with the all-meta route.
+	 *
 	 * @return array
 	 */
-	private function build_diff( WP_Post $post, array $remote ) {
+	private function build_diff( WP_Post $post, array $remote, $remote_id = 0 ) {
 		$diff = array();
 
-		foreach ( $this->compare_all_fields( $post, $remote ) as $row ) {
-			if ( ! $row['differs'] || Rest_In_Sync_Field_Settings::is_excluded_from_diff( $row['key'] ) ) {
+		foreach ( $this->compare_all_fields( $post, $remote, $remote_id ) as $row ) {
+			if ( ! $row['differs'] || ! $row['remote_exposed'] || Rest_In_Sync_Field_Settings::is_excluded_from_diff( $row['key'] ) ) {
 				continue;
 			}
 
@@ -390,14 +587,18 @@ class Rest_In_Sync_Sync_Checker {
 
 	/**
 	 * Builds a full field-by-field comparison of the local post against the
-	 * remote post: standard fields plus any meta the remote site exposes via
-	 * REST (excluding this plugin's own bookkeeping meta). Includes fields
-	 * with equal values, unlike build_diff(), so callers like the Details
-	 * view can show the complete field list.
+	 * remote post: standard fields, then meta — preferring the remote's
+	 * '/rest-in-sync/v1/meta/{id}' route (every meta key, regardless of REST
+	 * registration) when available, falling back to whatever the standard
+	 * REST API's 'meta' field exposes. Any local meta key still not covered by
+	 * either source is included too, flagged 'remote_exposed' => false since
+	 * we have no way to know what, if anything, the remote holds for it.
+	 * Includes fields with equal values, unlike build_diff(), so callers like
+	 * the Details view can show the complete field list.
 	 *
-	 * @return array[] Each row: type ('field'|'meta'), key, label, local, remote, differs.
+	 * @return array[] Each row: type ('field'|'meta'), key, label, local, remote, differs, remote_exposed.
 	 */
-	private function compare_all_fields( WP_Post $post, array $remote ) {
+	private function compare_all_fields( WP_Post $post, array $remote, $remote_id = 0 ) {
 		$rows = array();
 
 		$standard_fields = array(
@@ -411,35 +612,142 @@ class Rest_In_Sync_Sync_Checker {
 			list( $local_value, $remote_value, $label ) = $values;
 
 			$rows[] = array(
-				'type'    => 'field',
-				'key'     => $key,
-				'label'   => $label,
-				'local'   => $local_value,
-				'remote'  => $remote_value,
-				'differs' => (string) $local_value !== (string) $remote_value,
+				'type'           => 'field',
+				'key'            => $key,
+				'label'          => $label,
+				'local'          => $local_value,
+				'remote'         => $remote_value,
+				'differs'        => $this->values_differ( $local_value, $remote_value ),
+				'remote_exposed' => true,
 			);
 		}
 
-		if ( ! empty( $remote['meta'] ) && is_array( $remote['meta'] ) ) {
-			foreach ( $remote['meta'] as $meta_key => $remote_value ) {
-				if ( 0 === strpos( $meta_key, '_rest_in_sync_' ) ) {
-					continue;
-				}
+		$remote_meta = ( ! empty( $remote['meta'] ) && is_array( $remote['meta'] ) ) ? $remote['meta'] : array();
 
-				$local_value = get_post_meta( $post->ID, $meta_key, true );
+		if ( $remote_id ) {
+			$remote_meta = array_merge( $remote_meta, $this->fetch_remote_all_meta( $remote_id ) );
+		}
 
-				$rows[] = array(
-					'type'    => 'meta',
-					'key'     => $meta_key,
-					'label'   => $meta_key,
-					'local'   => $local_value,
-					'remote'  => $remote_value,
-					'differs' => (string) $local_value !== (string) $remote_value,
-				);
+		$remote_meta_keys = array();
+
+		foreach ( $remote_meta as $meta_key => $remote_value ) {
+			if ( 0 === strpos( $meta_key, '_rest_in_sync_' ) ) {
+				continue;
 			}
+
+			$remote_meta_keys[ $meta_key ] = true;
+			$local_value                   = get_post_meta( $post->ID, $meta_key, true );
+
+			$rows[] = array(
+				'type'           => 'meta',
+				'key'            => $meta_key,
+				'label'          => $meta_key,
+				'local'          => $local_value,
+				'remote'         => $remote_value,
+				'differs'        => $this->values_differ( $local_value, $remote_value ),
+				'remote_exposed' => true,
+			);
+		}
+
+		foreach ( $this->local_only_meta_keys( $post, $remote_meta_keys ) as $meta_key ) {
+			$rows[] = array(
+				'type'           => 'meta',
+				'key'            => $meta_key,
+				'label'          => $meta_key,
+				'local'          => get_post_meta( $post->ID, $meta_key, true ),
+				'remote'         => '',
+				'differs'        => true,
+				'remote_exposed' => false,
+			);
 		}
 
 		return $rows;
+	}
+
+	/**
+	 * Meta keys that exist on the local post but weren't covered by either
+	 * remote meta source (the standard REST 'meta' field or the all-meta
+	 * route) — almost always because neither the remote's REST registration
+	 * nor its rest-in-sync plugin version knows about them, not because the
+	 * remote post genuinely lacks them. Protected (underscore-prefixed) keys
+	 * are skipped: they're overwhelmingly internal bookkeeping (this plugin's
+	 * own meta, ACF's field-key shadow entries, edit locks, SEO plugin
+	 * internals, etc.) rather than content anyone would want to compare or sync.
+	 *
+	 * @return string[]
+	 */
+	private function local_only_meta_keys( WP_Post $post, array $remote_meta_keys ) {
+		global $wpdb;
+
+		$meta_keys = $wpdb->get_col( $wpdb->prepare(
+			"SELECT DISTINCT meta_key FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key NOT LIKE %s",
+			$post->ID,
+			$wpdb->esc_like( '_' ) . '%'
+		) );
+
+		return array_values( array_diff( $meta_keys, array_keys( $remote_meta_keys ) ) );
+	}
+
+	/**
+	 * Compares two field/meta values for the diff, treating the local and
+	 * remote home URLs as interchangeable first. Internal links, image src's,
+	 * etc. always embed the site's own domain, so a raw string comparison
+	 * would flag nearly every field as "out of sync" for that reason alone.
+	 */
+	private function values_differ( $local_value, $remote_value ) {
+		return $this->normalize_home_urls( (string) $local_value ) !== $this->normalize_home_urls( (string) $remote_value );
+	}
+
+	/**
+	 * Replaces every occurrence of either site's home URL (any scheme, with or
+	 * without "www.") with a shared placeholder, so comparisons focus on the
+	 * path/content rather than which domain it's hosted on.
+	 */
+	private function normalize_home_urls( $value ) {
+		if ( '' === $value ) {
+			return $value;
+		}
+
+		foreach ( array( home_url(), Rest_In_Sync_Settings::get_site_url() ) as $url ) {
+			$host = wp_parse_url( (string) $url, PHP_URL_HOST );
+
+			if ( ! $host ) {
+				continue;
+			}
+
+			$value = preg_replace( '#https?://(?:www\.)?' . preg_quote( $host, '#' ) . '#i', '{{HOME_URL}}', $value );
+		}
+
+		return $value;
+	}
+
+	/**
+	 * Rewrites every occurrence of $from_home's host (any scheme, with or
+	 * without "www.") to $to_home, recursing into arrays. Used when pushing so
+	 * this site's own URLs (in links, image src's, ACF fields, etc.) don't leak
+	 * into the other site's content — and, symmetrically, would be the way to
+	 * handle it if a "pull from remote" direction is ever added.
+	 */
+	private function rewrite_home_url( $value, $from_home, $to_home ) {
+		if ( is_array( $value ) ) {
+			foreach ( $value as $key => $item ) {
+				$value[ $key ] = $this->rewrite_home_url( $item, $from_home, $to_home );
+			}
+
+			return $value;
+		}
+
+		if ( ! is_string( $value ) || '' === $value ) {
+			return $value;
+		}
+
+		$from_host = wp_parse_url( (string) $from_home, PHP_URL_HOST );
+
+		if ( ! $from_host ) {
+			return $value;
+		}
+
+		return preg_replace( '#https?://(?:www\.)?' . preg_quote( $from_host, '#' ) . '#i', untrailingslashit( (string) $to_home ), $value );
 	}
 
 	private function remote_field_value( array $remote, $field ) {

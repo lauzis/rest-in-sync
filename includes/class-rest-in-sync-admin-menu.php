@@ -55,6 +55,16 @@ class Rest_In_Sync_Admin_Menu {
 				true
 			);
 		}
+
+		if ( 'toplevel_page_' . self::MENU_SLUG === $hook_suffix ) {
+			wp_enqueue_script(
+				'rest-in-sync-sync',
+				REST_IN_SYNC_URL . 'assets/js/sync.js',
+				array( 'jquery', 'rest-in-sync-toast' ),
+				REST_IN_SYNC_VERSION,
+				true
+			);
+		}
 	}
 
 	public function register_menu() {

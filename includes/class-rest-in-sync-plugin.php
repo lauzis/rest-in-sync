@@ -10,6 +10,8 @@ require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-connection-tester.p
 require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-cron.php';
 require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-field-settings.php';
 require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-sync-checker.php';
+require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-diff-renderer.php';
+require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-rest-controller.php';
 require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-ajax.php';
 
 /**
@@ -31,11 +33,13 @@ class Rest_In_Sync_Plugin {
 	private function __construct() {
 		add_action( 'after_setup_theme', array( $this, 'boot_carbon_fields' ) );
 		add_action( 'admin_notices', array( $this, 'maybe_render_missing_dependency_notice' ) );
+		add_action( 'init', array( 'Rest_In_Sync_Sync_Checker', 'register_meta_fields' ) );
 
 		new Rest_In_Sync_Admin_Menu();
 		new Rest_In_Sync_Settings();
 		new Rest_In_Sync_Cron();
 		new Rest_In_Sync_Ajax();
+		new Rest_In_Sync_Rest_Controller();
 	}
 
 	public function boot_carbon_fields() {

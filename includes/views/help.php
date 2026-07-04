@@ -8,7 +8,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 	<h2><?php esc_html_e( 'How REST in Sync connects to your live site', 'rest-in-sync' ); ?></h2>
 	<p>
-		<?php esc_html_e( 'REST in Sync talks to your live WordPress site using the built-in WordPress REST API (wp-json). It does not require a companion plugin on the remote site — any modern WordPress install with the REST API enabled will work.', 'rest-in-sync' ); ?>
+		<?php esc_html_e( 'REST in Sync talks to your live WordPress site using the built-in WordPress REST API (wp-json). It does not require a companion plugin on the remote site — any modern WordPress install with the REST API enabled will work, though running REST in Sync on both sites makes post matching more resilient (see "Cron sync checks" below).', 'rest-in-sync' ); ?>
 	</p>
 
 	<h2><?php esc_html_e( 'Setting up the connection', 'rest-in-sync' ); ?></h2>
@@ -49,10 +49,19 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 	<h2><?php esc_html_e( 'Cron sync checks', 'rest-in-sync' ); ?></h2>
 	<p>
-		<?php esc_html_e( 'A WP-Cron job runs in the background and periodically compares each syncable post against its counterpart on the live site, so out-of-sync content is flagged automatically instead of only being noticed when you manually check. On first check, a post is matched to a remote post by slug (falling back to a GUID match) and linked to it going forward. Posts flagged out of sync appear on the Sync page, where the "Details" link shows exactly which fields differ.', 'rest-in-sync' ); ?>
+		<?php esc_html_e( 'A WP-Cron job runs in the background and periodically compares each syncable post against its counterpart on the live site, so out-of-sync content is flagged automatically instead of only being noticed when you manually check. A post is matched to a remote post by slug, falling back to a scan for a matching GUID or UUID. The first time a match is found, its UUID is written back onto the matched remote post so future checks can match by that shared UUID even if the local slug later changes. Posts flagged out of sync appear on the Sync page, where the "Details" link shows exactly which fields differ.', 'rest-in-sync' ); ?>
 	</p>
 	<p>
-		<?php esc_html_e( 'This job only detects and records sync status — it never changes content on either site. Pushing content to the live site is always a manual action from the Sync Details page.', 'rest-in-sync' ); ?>
+		<?php esc_html_e( 'Writing that UUID back to the remote post only works if the remote site is also running REST in Sync; against a plain WordPress install the write is harmlessly rejected and matching just falls back to slug/GUID. Either way, this job only detects and records sync status — it never changes post content on either site. Pushing content to the live site is always a manual action from the Sync Details page.', 'rest-in-sync' ); ?>
+	</p>
+	<p>
+		<?php esc_html_e( 'If this site runs WPML, each post\'s language is detected automatically and sent along with every remote lookup, since WPML\'s own REST API otherwise limits search/list results to the site\'s default language and would make translated posts falsely appear unmatched.', 'rest-in-sync' ); ?>
+	</p>
+	<p>
+		<?php esc_html_e( 'Before comparing content, both sites\' home URLs are treated as interchangeable, so internal links and embedded media URLs — which always differ between this site and the live site — don\'t by themselves cause a post to be flagged out of sync.', 'rest-in-sync' ); ?>
+	</p>
+	<p>
+		<?php esc_html_e( 'Most custom fields (ACF and others) aren\'t registered for REST access, so the standard WordPress REST API never exposes them and they can\'t be compared by default. If the live site is also running REST in Sync, its own "/rest-in-sync/v1/meta/{id}" route is used instead to fetch every meta key directly, so those fields are properly compared and can trigger an out-of-sync result like any other field. Without that route on the other end, those fields still appear on the Sync Details page for visibility, but can\'t affect the out-of-sync status.', 'rest-in-sync' ); ?>
 	</p>
 	<p>
 		<?php esc_html_e( 'The cron job is configured on the Settings page:', 'rest-in-sync' ); ?>

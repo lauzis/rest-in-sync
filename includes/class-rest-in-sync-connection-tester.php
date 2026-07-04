@@ -56,17 +56,22 @@ class Rest_In_Sync_Connection_Tester {
 	 * @return array|\WP_Error
 	 */
 	private function fetch_recently_updated( $site_url, $username, $app_password ) {
-		$posts = $this->fetch_post_type( $site_url, $username, $app_password, 'posts' );
-		if ( is_wp_error( $posts ) ) {
-			return $posts;
+		$post_types = Rest_In_Sync_Settings::get_post_types_to_sync();
+
+		if ( empty( $post_types ) ) {
+			return new WP_Error( 'rest_in_sync_no_post_types', __( 'No post types are configured to sync. Choose at least one on the Settings page.', 'rest-in-sync' ) );
 		}
 
-		$pages = $this->fetch_post_type( $site_url, $username, $app_password, 'pages' );
-		if ( is_wp_error( $pages ) ) {
-			return $pages;
-		}
+		$items = array();
 
-		$items = array_merge( $posts, $pages );
+		foreach ( $post_types as $post_type ) {
+			$result = $this->fetch_post_type( $site_url, $username, $app_password, $post_type );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+
+			$items = array_merge( $items, $result );
+		}
 
 		usort( $items, function ( $a, $b ) {
 			return strcmp( $b['modified'], $a['modified'] );
@@ -76,10 +81,25 @@ class Rest_In_Sync_Connection_Tester {
 	}
 
 	/**
+	 * Returns the REST base (e.g. "posts", "pages") for a given post type name.
+	 *
+	 * @return string
+	 */
+	private function get_rest_base( $post_type ) {
+		$post_type_object = get_post_type_object( $post_type );
+
+		if ( $post_type_object && ! empty( $post_type_object->rest_base ) ) {
+			return $post_type_object->rest_base;
+		}
+
+		return $post_type;
+	}
+
+	/**
 	 * @return array|\WP_Error
 	 */
 	private function fetch_post_type( $site_url, $username, $app_password, $post_type ) {
-		$endpoint = trailingslashit( $site_url ) . 'wp-json/wp/v2/' . $post_type;
+		$endpoint = trailingslashit( $site_url ) . 'wp-json/wp/v2/' . $this->get_rest_base( $post_type );
 		$endpoint = add_query_arg( array(
 			'orderby'  => 'modified',
 			'order'    => 'desc',

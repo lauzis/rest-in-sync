@@ -18,7 +18,12 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 	<h3><?php esc_html_e( 'Testing the connection', 'rest-in-sync' ); ?></h3>
 	<p>
-		<?php esc_html_e( 'The "Test Connection" button on the Settings page sends a request to the live site\'s REST API and retrieves the 10 most recently updated posts and pages. A successful response confirms that the site URL is reachable and the credentials are valid. Any failure (unreachable site, invalid credentials, blocked REST API) is reported inline with the error returned by the site.', 'rest-in-sync' ); ?>
+		<?php esc_html_e( 'The "Test Connection" button on the Settings page sends a request to the live site\'s REST API and retrieves the 10 most recently updated items across the post types selected in "Post Types to Sync". A successful response confirms that the site URL is reachable and the credentials are valid. Any failure (unreachable site, invalid credentials, blocked REST API) is reported inline with the error returned by the site.', 'rest-in-sync' ); ?>
+	</p>
+
+	<h3><?php esc_html_e( 'Post types to sync', 'rest-in-sync' ); ?></h3>
+	<p>
+		<?php esc_html_e( 'The "Post Types to Sync" field on the Settings page lists every post type registered on this site that supports the REST API. Posts and Pages are checked by default; select or deselect post types to control which ones are checked and validated.', 'rest-in-sync' ); ?>
 	</p>
 
 	<h3><?php esc_html_e( 'What gets synced', 'rest-in-sync' ); ?></h3>

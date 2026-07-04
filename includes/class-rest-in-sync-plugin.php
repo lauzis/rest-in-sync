@@ -8,6 +8,7 @@ require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-settings.php';
 require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-logs.php';
 require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-connection-tester.php';
 require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-cron.php';
+require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-field-settings.php';
 require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-sync-checker.php';
 require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-ajax.php';
 

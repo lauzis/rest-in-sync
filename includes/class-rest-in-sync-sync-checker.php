@@ -28,6 +28,105 @@ class Rest_In_Sync_Sync_Checker {
 		( new self() )->run_batch();
 	}
 
+	/** Re-runs the sync check for a single post, e.g. right after a manual push. */
+	public function check_single( WP_Post $post ) {
+		$this->check_post( $post );
+	}
+
+	/**
+	 * Builds a live, full field-by-field comparison against the remote post for
+	 * the Details view, including fields with equal values and fields excluded
+	 * from the diff calculation (which still stay visible there).
+	 *
+	 * @return array{remote_id:int, rows:array[]}|WP_Error
+	 */
+	public function get_comparison( WP_Post $post ) {
+		$remote_id = $this->get_or_find_remote_id( $post );
+
+		if ( ! $remote_id ) {
+			return new WP_Error( 'rest_in_sync_no_remote_match', __( 'No matching post was found on the remote site.', 'rest-in-sync' ) );
+		}
+
+		$remote_post = $this->fetch_remote_post( $post->post_type, $remote_id );
+
+		if ( is_wp_error( $remote_post ) ) {
+			return $remote_post;
+		}
+
+		return array(
+			'remote_id' => $remote_id,
+			'rows'      => $this->compare_all_fields( $post, $remote_post ),
+		);
+	}
+
+	/**
+	 * Pushes the selected fields/meta to the remote post, then re-runs the sync
+	 * check for this post so its status and diff file reflect the new state.
+	 *
+	 * @param string[] $selected_keys Field/meta keys to push, as returned by get_comparison().
+	 * @return true|WP_Error
+	 */
+	public function push_to_remote( WP_Post $post, array $selected_keys ) {
+		$remote_id = $this->get_or_find_remote_id( $post );
+
+		if ( ! $remote_id ) {
+			return new WP_Error( 'rest_in_sync_no_remote_match', __( 'No matching post was found on the remote site.', 'rest-in-sync' ) );
+		}
+
+		$standard_fields = array( 'title', 'content', 'excerpt', 'status' );
+		$body            = array();
+		$meta            = array();
+
+		foreach ( $selected_keys as $key ) {
+			if ( in_array( $key, $standard_fields, true ) ) {
+				$body[ $key ] = 'title' === $key ? $post->post_title : ( 'content' === $key ? $post->post_content : ( 'excerpt' === $key ? $post->post_excerpt : $post->post_status ) );
+			} else {
+				$meta[ $key ] = get_post_meta( $post->ID, $key, true );
+			}
+		}
+
+		if ( ! empty( $meta ) ) {
+			$body['meta'] = $meta;
+		}
+
+		if ( empty( $body ) ) {
+			return new WP_Error( 'rest_in_sync_no_fields', __( 'No fields were selected to push.', 'rest-in-sync' ) );
+		}
+
+		$endpoint = $this->rest_endpoint( $this->get_rest_base( $post->post_type ) ) . '/' . $remote_id;
+		$response = $this->remote_post( $endpoint, $body );
+
+		if ( is_wp_error( $response ) ) {
+			Rest_In_Sync_Logs::add_error( 'push_to_remote', $response->get_error_message(), array( 'post_id' => $post->ID ) );
+
+			return $response;
+		}
+
+		Rest_In_Sync_Logs::add_log(
+			'push_to_remote',
+			sprintf( 'Pushed %d field(s) for post #%d', count( $selected_keys ), $post->ID ),
+			array( 'post_id' => $post->ID, 'fields' => $selected_keys )
+		);
+
+		$this->check_post( $post );
+
+		return true;
+	}
+
+	private function get_or_find_remote_id( WP_Post $post ) {
+		$remote_id = (int) get_post_meta( $post->ID, self::META_REMOTE_ID, true );
+
+		if ( ! $remote_id ) {
+			$remote_id = $this->find_remote_id( $post );
+
+			if ( $remote_id ) {
+				update_post_meta( $post->ID, self::META_REMOTE_ID, $remote_id );
+			}
+		}
+
+		return $remote_id;
+	}
+
 	public function run_batch() {
 		$post_types = Rest_In_Sync_Settings::get_post_types_to_sync();
 
@@ -107,15 +206,7 @@ class Rest_In_Sync_Sync_Checker {
 			update_post_meta( $post->ID, self::META_STATUS, self::STATUS_NEVER_SYNCED );
 		}
 
-		$remote_id = (int) get_post_meta( $post->ID, self::META_REMOTE_ID, true );
-
-		if ( ! $remote_id ) {
-			$remote_id = $this->find_remote_id( $post );
-
-			if ( $remote_id ) {
-				update_post_meta( $post->ID, self::META_REMOTE_ID, $remote_id );
-			}
-		}
+		$remote_id = $this->get_or_find_remote_id( $post );
 
 		if ( ! $remote_id ) {
 			$this->finish_check( $post, self::STATUS_OUT_OF_SYNC, array(
@@ -272,40 +363,83 @@ class Rest_In_Sync_Sync_Checker {
 	}
 
 	/**
-	 * Compares local post fields and meta (excluding this plugin's own
-	 * bookkeeping meta) against the remote post, returning only the fields
-	 * that differ.
+	 * Compares local post fields and meta against the remote post, returning
+	 * only the fields that differ and aren't flagged exclude_from_diff.
 	 *
 	 * @return array
 	 */
 	private function build_diff( WP_Post $post, array $remote ) {
 		$diff = array();
 
-		$fields = array(
-			'title'   => array( $post->post_title, $this->remote_field_value( $remote, 'title' ) ),
-			'content' => array( $post->post_content, $this->remote_field_value( $remote, 'content' ) ),
-			'excerpt' => array( $post->post_excerpt, $this->remote_field_value( $remote, 'excerpt' ) ),
-			'status'  => array( $post->post_status, isset( $remote['status'] ) ? $remote['status'] : '' ),
+		foreach ( $this->compare_all_fields( $post, $remote ) as $row ) {
+			if ( ! $row['differs'] || Rest_In_Sync_Field_Settings::is_excluded_from_diff( $row['key'] ) ) {
+				continue;
+			}
+
+			$values = array( 'local' => $row['local'], 'remote' => $row['remote'] );
+
+			if ( 'meta' === $row['type'] ) {
+				$diff['meta'][ $row['key'] ] = $values;
+			} else {
+				$diff[ $row['key'] ] = $values;
+			}
+		}
+
+		return $diff;
+	}
+
+	/**
+	 * Builds a full field-by-field comparison of the local post against the
+	 * remote post: standard fields plus any meta the remote site exposes via
+	 * REST (excluding this plugin's own bookkeeping meta). Includes fields
+	 * with equal values, unlike build_diff(), so callers like the Details
+	 * view can show the complete field list.
+	 *
+	 * @return array[] Each row: type ('field'|'meta'), key, label, local, remote, differs.
+	 */
+	private function compare_all_fields( WP_Post $post, array $remote ) {
+		$rows = array();
+
+		$standard_fields = array(
+			'title'   => array( $post->post_title, $this->remote_field_value( $remote, 'title' ), __( 'Title', 'rest-in-sync' ) ),
+			'content' => array( $post->post_content, $this->remote_field_value( $remote, 'content' ), __( 'Content', 'rest-in-sync' ) ),
+			'excerpt' => array( $post->post_excerpt, $this->remote_field_value( $remote, 'excerpt' ), __( 'Excerpt', 'rest-in-sync' ) ),
+			'status'  => array( $post->post_status, isset( $remote['status'] ) ? $remote['status'] : '', __( 'Status', 'rest-in-sync' ) ),
 		);
 
-		foreach ( $fields as $field => $values ) {
-			list( $local_value, $remote_value ) = $values;
+		foreach ( $standard_fields as $key => $values ) {
+			list( $local_value, $remote_value, $label ) = $values;
 
-			if ( (string) $local_value !== (string) $remote_value ) {
-				$diff[ $field ] = array(
-					'local'  => $local_value,
-					'remote' => $remote_value,
+			$rows[] = array(
+				'type'    => 'field',
+				'key'     => $key,
+				'label'   => $label,
+				'local'   => $local_value,
+				'remote'  => $remote_value,
+				'differs' => (string) $local_value !== (string) $remote_value,
+			);
+		}
+
+		if ( ! empty( $remote['meta'] ) && is_array( $remote['meta'] ) ) {
+			foreach ( $remote['meta'] as $meta_key => $remote_value ) {
+				if ( 0 === strpos( $meta_key, '_rest_in_sync_' ) ) {
+					continue;
+				}
+
+				$local_value = get_post_meta( $post->ID, $meta_key, true );
+
+				$rows[] = array(
+					'type'    => 'meta',
+					'key'     => $meta_key,
+					'label'   => $meta_key,
+					'local'   => $local_value,
+					'remote'  => $remote_value,
+					'differs' => (string) $local_value !== (string) $remote_value,
 				);
 			}
 		}
 
-		$meta_diff = $this->build_meta_diff( $post->ID, $remote );
-
-		if ( ! empty( $meta_diff ) ) {
-			$diff['meta'] = $meta_diff;
-		}
-
-		return $diff;
+		return $rows;
 	}
 
 	private function remote_field_value( array $remote, $field ) {
@@ -314,37 +448,6 @@ class Rest_In_Sync_Sync_Checker {
 		}
 
 		return isset( $remote[ $field ]['rendered'] ) ? $remote[ $field ]['rendered'] : '';
-	}
-
-	/**
-	 * Only compares meta keys the remote site exposes via REST (i.e. those
-	 * registered with show_in_rest), since there's no way to read any others
-	 * from the remote response. This plugin's own meta is always excluded to
-	 * avoid a field flip-flopping the sync status on every check.
-	 */
-	private function build_meta_diff( $post_id, array $remote ) {
-		if ( empty( $remote['meta'] ) || ! is_array( $remote['meta'] ) ) {
-			return array();
-		}
-
-		$diff = array();
-
-		foreach ( $remote['meta'] as $key => $remote_value ) {
-			if ( 0 === strpos( $key, '_rest_in_sync_' ) ) {
-				continue;
-			}
-
-			$local_value = get_post_meta( $post_id, $key, true );
-
-			if ( (string) $local_value !== (string) $remote_value ) {
-				$diff[ $key ] = array(
-					'local'  => $local_value,
-					'remote' => $remote_value,
-				);
-			}
-		}
-
-		return $diff;
 	}
 
 	private function rest_endpoint( $rest_base ) {
@@ -389,5 +492,37 @@ class Rest_In_Sync_Sync_Checker {
 		}
 
 		return is_array( $body ) ? $body : array();
+	}
+
+	/**
+	 * @return array|WP_Error Decoded JSON body, or WP_Error on failure.
+	 */
+	private function remote_post( $endpoint, array $body ) {
+		$username     = trim( (string) Rest_In_Sync_Settings::get_username() );
+		$app_password = trim( (string) Rest_In_Sync_Settings::get_app_password() );
+
+		$response = wp_remote_post( $endpoint, array(
+			'timeout' => 15,
+			'headers' => array(
+				'Authorization' => 'Basic ' . base64_encode( $username . ':' . $app_password ),
+				'Content-Type'  => 'application/json',
+			),
+			'body'    => wp_json_encode( $body ),
+		) );
+
+		if ( is_wp_error( $response ) ) {
+			return $response;
+		}
+
+		$status_code = wp_remote_retrieve_response_code( $response );
+		$decoded     = json_decode( wp_remote_retrieve_body( $response ), true );
+
+		if ( $status_code < 200 || $status_code >= 300 ) {
+			$message = is_array( $decoded ) && isset( $decoded['message'] ) ? $decoded['message'] : wp_remote_retrieve_response_message( $response );
+
+			return new WP_Error( 'rest_in_sync_remote_error', $message );
+		}
+
+		return is_array( $decoded ) ? $decoded : array();
 	}
 }

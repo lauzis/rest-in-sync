@@ -8,7 +8,7 @@ The plugin registers a top-level **REST in Sync** menu with the following pages:
 
 | Page | Description |
 | --- | --- |
-| Sync | Lists posts flagged out of sync by the cron job, with a "Details" link per row that opens the local-vs-remote diff in a new tab. |
+| Sync | Lists posts flagged out of sync by the cron job, with a "Details" link per row that opens the field-by-field sync details page in a new tab. |
 | Help | Explains how the plugin connects to the live site via the REST API. |
 | Logs | Shows daily log files of sync and connection test activity, with a file selector and a "Clear all logs" button. |
 | Settings | Carbon Fields powered form to configure the remote site connection, which post types to sync, with a "Test Connection" button and an "Enable logging" toggle. |
@@ -39,14 +39,30 @@ Each checked post gets these meta fields:
 | `_rest_in_sync_last_checked` | Unix timestamp of the last comparison. |
 | `_rest_in_sync_diff_id` | UUID of the diff JSON file, present only when out of sync. |
 
-When a post is out of sync, the differing fields are written as JSON to `wp-content/uploads/rest-in-sync-diffs/{uuid}.json`. The Sync page lists every out-of-sync post (title, post type, last checked); its "Details" link opens that post's diff file in a new tab as a local-vs-remote comparison of the differing fields.
+When a post is out of sync, the differing fields are written as JSON to `wp-content/uploads/rest-in-sync-diffs/{uuid}.json`. The Sync page lists every out-of-sync post (title, post type, last checked); its "Details" link opens that post's Sync Details page in a new tab.
 
 The Settings page configures:
 - **Cron Batch Size** — how many posts are checked per cron run (default 10).
 - **Sync Check Interval** — how often the cron runs, from every 5 minutes up to every 24 hours (default every 15 minutes).
 - **Resync Threshold (hours)** — how long to wait before re-checking a post that's already been checked; posts that have never been checked are always processed first (default 24 hours).
 
-This job only detects and records sync status — it doesn't push or pull content. Resolving an out-of-sync post is a manual action, covered separately.
+## Field settings
+
+Every comparable field/meta key (the same set the cron job compares) has two global toggles, stored once per field/meta name in the `rest_in_sync_field_settings` option and applied across all post types:
+
+- **Don't sync by default** — excludes the field from the default checkbox selection on the Sync Details page. It still shows up there; it's just unchecked unless selected manually.
+- **Don't use in diff** — excludes the field from the cron job's out-of-sync comparison and from the stored diff, so a field that's expected to differ (e.g. a per-environment value) doesn't keep the post flagged out of sync. The field still appears on the Sync Details page for manual pushing.
+
+## Sync Details page
+
+The "Details" link on the Sync page opens a per-post Sync Details page with a live, field-by-field comparison against the remote post (including fields with equal values, hidden by default — toggle "Show fields with equal values" to reveal them). Each row has:
+
+- A **Sync** checkbox, checked by default unless the field is set to "Don't sync by default" — with **Select All** / **Select None** / **Select Default** controls above the table.
+- The two per-field toggle buttons described above.
+
+**Push to Remote** sends the checked fields (and any selected meta as a `meta` object) as an authenticated REST request to the remote post, then re-runs the sync check for that post so its status and diff reflect the new state. The result is shown as a toast notification, consistent with Test Connection's UX.
+
+This job only detects and records sync status — pushing content is a manual action from the Sync Details page.
 
 ## Logging
 

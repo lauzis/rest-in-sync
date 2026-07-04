@@ -23,6 +23,31 @@ The **Test Connection** button calls the remote site's REST API for each selecte
 
 The **Post Types to Sync** field on the Settings page lists every post type registered on this site that supports the REST API, so you can choose which ones get checked and validated. Posts and Pages are checked by default.
 
+## Sync status cron job
+
+A WP-Cron job periodically compares each syncable post against its counterpart on the remote site and records whether it's in sync. On first check, a post is matched to a remote post by slug (falling back to a GUID match), and a UUID is stored on the post to link it to the remote item going forward.
+
+The comparison covers `post_title`, `post_content`, `post_excerpt`, `post_status`, and any post meta the remote site exposes via REST — excluding this plugin's own bookkeeping meta, so tracking the sync status itself can't cause a false "out of sync" result.
+
+Each checked post gets these meta fields:
+
+| Meta key | Description |
+| --- | --- |
+| `_rest_in_sync_uuid` | UUID identifying the post for sync linking. |
+| `_rest_in_sync_remote_id` | The matched post's ID on the remote site. |
+| `_rest_in_sync_status` | `never_synced`, `in_sync`, or `out_of_sync`. |
+| `_rest_in_sync_last_checked` | Unix timestamp of the last comparison. |
+| `_rest_in_sync_diff_id` | UUID of the diff JSON file, present only when out of sync. |
+
+When a post is out of sync, the differing fields are written as JSON to `wp-content/uploads/rest-in-sync-diffs/{uuid}.json`.
+
+The Settings page configures:
+- **Cron Batch Size** — how many posts are checked per cron run (default 10).
+- **Sync Check Interval** — how often the cron runs, from every 5 minutes up to every 24 hours (default every 15 minutes).
+- **Resync Threshold (hours)** — how long to wait before re-checking a post that's already been checked; posts that have never been checked are always processed first (default 24 hours).
+
+This job only detects and records sync status — it doesn't push or pull content. Resolving an out-of-sync post is a manual action, covered separately.
+
 ## Logging
 
 When "Enable logging" is checked on the Settings page, connection test activity (and any future sync operations) is written to daily log files under `wp-content/uploads/rest-in-sync-logs/`. Errors are always written to PHP's `error_log`, and additionally to these files when logging is enabled. The Logs page lets you pick a day's log file, view its entries, or clear all log files, confirming deletion with a toast notification.

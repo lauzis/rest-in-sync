@@ -7,6 +7,8 @@ require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-admin-menu.php';
 require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-settings.php';
 require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-logs.php';
 require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-connection-tester.php';
+require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-cron.php';
+require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-sync-checker.php';
 require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-ajax.php';
 
 /**
@@ -31,6 +33,7 @@ class Rest_In_Sync_Plugin {
 
 		new Rest_In_Sync_Admin_Menu();
 		new Rest_In_Sync_Settings();
+		new Rest_In_Sync_Cron();
 		new Rest_In_Sync_Ajax();
 	}
 

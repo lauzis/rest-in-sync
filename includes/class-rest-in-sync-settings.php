@@ -8,13 +8,19 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class Rest_In_Sync_Settings {
 
-	const OPTION_SITE_URL       = 'rest_in_sync_site_url';
-	const OPTION_USERNAME       = 'rest_in_sync_username';
-	const OPTION_APP_PASSWORD   = 'rest_in_sync_app_password';
-	const OPTION_ENABLE_LOGGING = 'rest_in_sync_enable_logging';
-	const OPTION_POST_TYPES     = 'rest_in_sync_post_types_to_sync';
+	const OPTION_SITE_URL              = 'rest_in_sync_site_url';
+	const OPTION_USERNAME              = 'rest_in_sync_username';
+	const OPTION_APP_PASSWORD          = 'rest_in_sync_app_password';
+	const OPTION_ENABLE_LOGGING        = 'rest_in_sync_enable_logging';
+	const OPTION_POST_TYPES            = 'rest_in_sync_post_types_to_sync';
+	const OPTION_CRON_BATCH_SIZE       = 'rest_in_sync_cron_batch_size';
+	const OPTION_CRON_INTERVAL         = 'rest_in_sync_cron_interval';
+	const OPTION_RESYNC_THRESHOLD_HOURS = 'rest_in_sync_resync_threshold_hours';
 
-	const DEFAULT_POST_TYPES = array( 'post', 'page' );
+	const DEFAULT_POST_TYPES               = array( 'post', 'page' );
+	const DEFAULT_CRON_BATCH_SIZE          = 10;
+	const DEFAULT_CRON_INTERVAL            = 'every_15_minutes';
+	const DEFAULT_RESYNC_THRESHOLD_HOURS   = 24;
 
 	public function __construct() {
 		add_action( 'carbon_fields_register_fields', array( $this, 'register_fields' ) );
@@ -65,6 +71,26 @@ class Rest_In_Sync_Settings {
 					->set_options( array( __CLASS__, 'get_available_post_types' ) )
 					->set_default_value( self::DEFAULT_POST_TYPES )
 					->set_help_text( __( 'Choose which post types should be checked and validated via the REST API.', 'rest-in-sync' ) ),
+
+				\Carbon_Fields\Field\Field::make( 'html', 'rest_in_sync_cron_intro' )
+					->set_html( '<hr><p>' . esc_html__( 'The sync status cron job periodically compares local posts against the remote site and flags any that have drifted out of sync.', 'rest-in-sync' ) . '</p>' ),
+
+				\Carbon_Fields\Field\Field::make( 'text', self::OPTION_CRON_BATCH_SIZE, __( 'Cron Batch Size', 'rest-in-sync' ) )
+					->set_attribute( 'type', 'number' )
+					->set_attribute( 'min', '1' )
+					->set_default_value( self::DEFAULT_CRON_BATCH_SIZE )
+					->set_help_text( __( 'How many posts to check for changes on each cron run.', 'rest-in-sync' ) ),
+
+				\Carbon_Fields\Field\Field::make( 'select', self::OPTION_CRON_INTERVAL, __( 'Sync Check Interval', 'rest-in-sync' ) )
+					->set_options( array( 'Rest_In_Sync_Cron', 'get_interval_options' ) )
+					->set_default_value( self::DEFAULT_CRON_INTERVAL )
+					->set_help_text( __( 'How often the cron job runs to check posts for out-of-sync changes.', 'rest-in-sync' ) ),
+
+				\Carbon_Fields\Field\Field::make( 'text', self::OPTION_RESYNC_THRESHOLD_HOURS, __( 'Resync Threshold (hours)', 'rest-in-sync' ) )
+					->set_attribute( 'type', 'number' )
+					->set_attribute( 'min', '1' )
+					->set_default_value( self::DEFAULT_RESYNC_THRESHOLD_HOURS )
+					->set_help_text( __( 'Posts checked more recently than this many hours ago are skipped until this many hours have passed. Posts that have never been checked are always processed.', 'rest-in-sync' ) ),
 			) );
 	}
 
@@ -115,6 +141,25 @@ class Rest_In_Sync_Settings {
 		}
 
 		return $post_types;
+	}
+
+	public static function get_cron_batch_size() {
+		$batch_size = (int) self::get_option( self::OPTION_CRON_BATCH_SIZE );
+
+		return $batch_size > 0 ? $batch_size : self::DEFAULT_CRON_BATCH_SIZE;
+	}
+
+	public static function get_cron_interval() {
+		$interval  = self::get_option( self::OPTION_CRON_INTERVAL );
+		$intervals = Rest_In_Sync_Cron::get_intervals();
+
+		return isset( $intervals[ $interval ] ) ? $interval : self::DEFAULT_CRON_INTERVAL;
+	}
+
+	public static function get_resync_threshold_hours() {
+		$hours = (int) self::get_option( self::OPTION_RESYNC_THRESHOLD_HOURS );
+
+		return $hours > 0 ? $hours : self::DEFAULT_RESYNC_THRESHOLD_HOURS;
 	}
 
 	/**

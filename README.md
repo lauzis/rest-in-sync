@@ -8,7 +8,7 @@ The plugin registers a top-level **REST in Sync** menu with the following pages:
 
 | Page | Description |
 | --- | --- |
-| Sync | Placeholder — sync tooling is not implemented yet. |
+| Sync | Lists posts flagged out of sync by the cron job, with a "Details" link per row that opens the local-vs-remote diff in a new tab. |
 | Help | Explains how the plugin connects to the live site via the REST API. |
 | Logs | Shows daily log files of sync and connection test activity, with a file selector and a "Clear all logs" button. |
 | Settings | Carbon Fields powered form to configure the remote site connection, which post types to sync, with a "Test Connection" button and an "Enable logging" toggle. |
@@ -39,7 +39,7 @@ Each checked post gets these meta fields:
 | `_rest_in_sync_last_checked` | Unix timestamp of the last comparison. |
 | `_rest_in_sync_diff_id` | UUID of the diff JSON file, present only when out of sync. |
 
-When a post is out of sync, the differing fields are written as JSON to `wp-content/uploads/rest-in-sync-diffs/{uuid}.json`.
+When a post is out of sync, the differing fields are written as JSON to `wp-content/uploads/rest-in-sync-diffs/{uuid}.json`. The Sync page lists every out-of-sync post (title, post type, last checked); its "Details" link opens that post's diff file in a new tab as a local-vs-remote comparison of the differing fields.
 
 The Settings page configures:
 - **Cron Batch Size** — how many posts are checked per cron run (default 10).

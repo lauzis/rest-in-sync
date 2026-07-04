@@ -14,6 +14,9 @@ class Rest_In_Sync_Admin_Menu {
 
 	const MENU_SLUG = 'rest-in-sync';
 
+	/** Nonce action prefix for the diff details page; suffixed with the diff_id being viewed. */
+	const DIFF_NONCE_ACTION = 'rest_in_sync_view_diff';
+
 	public function __construct() {
 		// Priority 5 so our submenus render before the Carbon Fields Settings page (added at default priority 10).
 		add_action( 'admin_menu', array( $this, 'register_menu' ), 5 );
@@ -81,6 +84,16 @@ class Rest_In_Sync_Admin_Menu {
 			self::MENU_SLUG . '-logs',
 			array( $this, 'render_logs_page' )
 		);
+
+		// Parent slug null keeps the diff details page out of the menu; it's only ever reached via the "Details" link on the Sync page.
+		add_submenu_page(
+			null,
+			__( 'Sync Diff', 'rest-in-sync' ),
+			__( 'Sync Diff', 'rest-in-sync' ),
+			'manage_options',
+			self::MENU_SLUG . '-diff',
+			array( $this, 'render_diff_page' )
+		);
 	}
 
 	public function render_sync_page() {
@@ -93,5 +106,9 @@ class Rest_In_Sync_Admin_Menu {
 
 	public function render_logs_page() {
 		require REST_IN_SYNC_DIR . 'includes/views/logs.php';
+	}
+
+	public function render_diff_page() {
+		require REST_IN_SYNC_DIR . 'includes/views/diff.php';
 	}
 }

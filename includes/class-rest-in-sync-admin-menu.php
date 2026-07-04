@@ -17,6 +17,31 @@ class Rest_In_Sync_Admin_Menu {
 	public function __construct() {
 		// Priority 5 so our submenus render before the Carbon Fields Settings page (added at default priority 10).
 		add_action( 'admin_menu', array( $this, 'register_menu' ), 5 );
+		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_toast_assets' ) );
+	}
+
+	/**
+	 * Loads the toast notification component on every REST in Sync admin page.
+	 */
+	public function enqueue_toast_assets( $hook_suffix ) {
+		if ( strpos( (string) $hook_suffix, self::MENU_SLUG ) === false ) {
+			return;
+		}
+
+		wp_enqueue_style(
+			'rest-in-sync-toast',
+			REST_IN_SYNC_URL . 'assets/css/toast.css',
+			array(),
+			REST_IN_SYNC_VERSION
+		);
+
+		wp_enqueue_script(
+			'rest-in-sync-toast',
+			REST_IN_SYNC_URL . 'assets/js/toast.js',
+			array(),
+			REST_IN_SYNC_VERSION,
+			true
+		);
 	}
 
 	public function register_menu() {

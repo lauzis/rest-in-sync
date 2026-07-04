@@ -76,7 +76,7 @@ class Rest_In_Sync_Settings {
 		wp_enqueue_script(
 			'rest-in-sync-admin',
 			REST_IN_SYNC_URL . 'assets/js/admin.js',
-			array( 'jquery' ),
+			array( 'jquery', 'rest-in-sync-toast' ),
 			REST_IN_SYNC_VERSION,
 			true
 		);

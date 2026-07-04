@@ -19,18 +19,27 @@
 				action: 'rest_in_sync_test_connection',
 				nonce: restInSync.nonce
 			} ).done( function ( response ) {
+				var success = response && response.success;
 				var message = response && response.data && response.data.message
 					? response.data.message
 					: restInSync.i18n.error;
 
-				renderResult( response && response.success, message, response && response.data ? response.data.items : null );
+				renderResult( success, message, response && response.data ? response.data.items : null );
+				showToast( message, success ? 'success' : 'error' );
 			} ).fail( function () {
 				renderResult( false, restInSync.i18n.error, null );
+				showToast( restInSync.i18n.error, 'error' );
 			} ).always( function () {
 				$button.prop( 'disabled', false );
 				$spinner.removeClass( 'is-active' );
 			} );
 		} );
+
+		function showToast( message, type ) {
+			if ( window.RestInSyncToast ) {
+				window.RestInSyncToast.show( message, type );
+			}
+		}
 
 		function renderResult( success, message, items ) {
 			var $notice = $( '<div>' )

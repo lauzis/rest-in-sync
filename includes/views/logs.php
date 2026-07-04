@@ -46,6 +46,13 @@ if ( ! empty( $log_files ) ) {
 
 	<?php if ( $cleared ) : ?>
 		<div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'All log files deleted.', 'rest-in-sync' ); ?></p></div>
+		<script>
+		document.addEventListener( 'DOMContentLoaded', function () {
+			if ( window.RestInSyncToast ) {
+				window.RestInSyncToast.show( <?php echo wp_json_encode( __( 'All log files deleted.', 'rest-in-sync' ) ); ?>, 'success' );
+			}
+		} );
+		</script>
 	<?php endif; ?>
 
 	<?php if ( ! Rest_In_Sync_Logs::enabled() ) : ?>

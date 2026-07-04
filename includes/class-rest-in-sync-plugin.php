@@ -5,6 +5,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-admin-menu.php';
 require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-settings.php';
+require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-logs.php';
 require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-connection-tester.php';
 require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-ajax.php';
 

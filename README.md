@@ -10,14 +10,18 @@ The plugin registers a top-level **REST in Sync** menu with the following pages:
 | --- | --- |
 | Sync | Placeholder — sync tooling is not implemented yet. |
 | Help | Explains how the plugin connects to the live site via the REST API. |
-| Logs | Placeholder — sync logging is not implemented yet. |
-| Settings | Carbon Fields powered form to configure the remote site connection, with a "Test Connection" button. |
+| Logs | Shows daily log files of sync and connection test activity, with a file selector and a "Clear all logs" button. |
+| Settings | Carbon Fields powered form to configure the remote site connection, with a "Test Connection" button and an "Enable logging" toggle. |
 
 ## Connecting to a live site
 
 The Settings page collects the live site's URL, a WordPress username, and an [Application Password](https://make.wordpress.org/core/2020/11/05/application-passwords-integration-guide/) for that user. Requests to the remote site are authenticated with HTTP Basic Auth using those credentials.
 
 The **Test Connection** button calls the remote site's REST API (`/wp-json/wp/v2/posts` and `/wp-json/wp/v2/pages`) and displays the 10 most recently updated posts/pages, or an error if the site is unreachable or the credentials are invalid.
+
+## Logging
+
+When "Enable logging" is checked on the Settings page, connection test activity (and any future sync operations) is written to daily log files under `wp-content/uploads/rest-in-sync-logs/`. Errors are always written to PHP's `error_log`, and additionally to these files when logging is enabled. The Logs page lets you pick a day's log file, view its entries, or clear all log files.
 
 ## Development
 

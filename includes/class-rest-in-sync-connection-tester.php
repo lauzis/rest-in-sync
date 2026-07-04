@@ -26,14 +26,20 @@ class Rest_In_Sync_Connection_Tester {
 			);
 		}
 
+		Rest_In_Sync_Logs::add_log( 'test_connection', 'Testing connection', array( 'site_url' => $site_url ) );
+
 		$items_or_error = $this->fetch_recently_updated( $site_url, $username, $app_password );
 
 		if ( is_wp_error( $items_or_error ) ) {
+			Rest_In_Sync_Logs::add_error( 'test_connection', $items_or_error->get_error_message(), array( 'site_url' => $site_url ) );
+
 			return array(
 				'success' => false,
 				'message' => $items_or_error->get_error_message(),
 			);
 		}
+
+		Rest_In_Sync_Logs::add_log( 'test_connection', 'Connection successful', array( 'items_fetched' => count( $items_or_error ) ) );
 
 		return array(
 			'success' => true,
@@ -90,6 +96,8 @@ class Rest_In_Sync_Connection_Tester {
 		) );
 
 		if ( is_wp_error( $response ) ) {
+			Rest_In_Sync_Logs::add_error( 'fetch_post_type', $response->get_error_message(), array( 'post_type' => $post_type, 'endpoint' => $endpoint ) );
+
 			return $response;
 		}
 
@@ -98,6 +106,8 @@ class Rest_In_Sync_Connection_Tester {
 
 		if ( $status_code < 200 || $status_code >= 300 ) {
 			$message = is_array( $body ) && isset( $body['message'] ) ? $body['message'] : wp_remote_retrieve_response_message( $response );
+
+			Rest_In_Sync_Logs::add_error( 'fetch_post_type', $message, array( 'post_type' => $post_type, 'status_code' => $status_code ) );
 
 			return new WP_Error(
 				'rest_in_sync_remote_error',

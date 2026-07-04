@@ -8,9 +8,10 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class Rest_In_Sync_Settings {
 
-	const OPTION_SITE_URL     = 'rest_in_sync_site_url';
-	const OPTION_USERNAME     = 'rest_in_sync_username';
-	const OPTION_APP_PASSWORD = 'rest_in_sync_app_password';
+	const OPTION_SITE_URL       = 'rest_in_sync_site_url';
+	const OPTION_USERNAME       = 'rest_in_sync_username';
+	const OPTION_APP_PASSWORD   = 'rest_in_sync_app_password';
+	const OPTION_ENABLE_LOGGING = 'rest_in_sync_enable_logging';
 
 	public function __construct() {
 		add_action( 'carbon_fields_register_fields', array( $this, 'register_fields' ) );
@@ -53,6 +54,9 @@ class Rest_In_Sync_Settings {
 						. '<span id="rest-in-sync-test-connection-spinner" class="spinner" style="float:none;"></span>'
 						. '<div id="rest-in-sync-test-connection-result" style="margin-top:10px;"></div>'
 					),
+
+				\Carbon_Fields\Field\Field::make( 'checkbox', self::OPTION_ENABLE_LOGGING, __( 'Enable logging', 'rest-in-sync' ) )
+					->set_help_text( __( 'Write sync and connection test activity to daily log files, viewable on the Logs page.', 'rest-in-sync' ) ),
 			) );
 	}
 
@@ -89,6 +93,10 @@ class Rest_In_Sync_Settings {
 
 	public static function get_app_password() {
 		return self::get_option( self::OPTION_APP_PASSWORD );
+	}
+
+	public static function logging_enabled() {
+		return (bool) self::get_option( self::OPTION_ENABLE_LOGGING );
 	}
 
 	private static function get_option( $name ) {

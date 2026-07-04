@@ -18,6 +18,10 @@ define( 'REST_IN_SYNC_FILE', __FILE__ );
 define( 'REST_IN_SYNC_DIR', plugin_dir_path( __FILE__ ) );
 define( 'REST_IN_SYNC_URL', plugin_dir_url( __FILE__ ) );
 
+$rest_in_sync_upload_dir = wp_upload_dir();
+define( 'REST_IN_SYNC_LOG_PATH', str_replace( '\\', '/', $rest_in_sync_upload_dir['basedir'] . '/rest-in-sync-logs/' ) );
+unset( $rest_in_sync_upload_dir );
+
 $rest_in_sync_autoload = REST_IN_SYNC_DIR . 'vendor/autoload.php';
 if ( file_exists( $rest_in_sync_autoload ) ) {
 	require_once $rest_in_sync_autoload;

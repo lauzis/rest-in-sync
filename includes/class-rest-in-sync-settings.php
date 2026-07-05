@@ -8,6 +8,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class Rest_In_Sync_Settings {
 
+	const OPTION_IS_REMOTE_SERVER       = 'rest_in_sync_is_remote_server';
 	const OPTION_SITE_URL              = 'rest_in_sync_site_url';
 	const OPTION_USERNAME              = 'rest_in_sync_username';
 	const OPTION_APP_PASSWORD          = 'rest_in_sync_app_password';
@@ -37,6 +38,9 @@ class Rest_In_Sync_Settings {
 			->set_page_file( Rest_In_Sync_Admin_Menu::MENU_SLUG . '-settings' )
 			->set_page_menu_title( __( 'Settings', 'rest-in-sync' ) )
 			->add_fields( array(
+				\Carbon_Fields\Field\Field::make( 'checkbox', self::OPTION_IS_REMOTE_SERVER, __( 'This is the remote server', 'rest-in-sync' ) )
+					->set_help_text( __( 'Check this on the live/target site of a sync pair. It disables this site\'s own sync cron job and the manual sync actions below (Check Now, Resync Now, Push to Remote) — this site is only ever the destination, never the one initiating checks. The "/rest-in-sync/v1/meta/{id}" REST route (used by the other site to fetch full meta data) keeps working regardless, since that\'s what makes this useful as a remote target in the first place.', 'rest-in-sync' ) ),
+
 				\Carbon_Fields\Field\Field::make( 'html', 'rest_in_sync_settings_intro' )
 					->set_html( '<p>' . esc_html__( 'Enter the connection details for the live WordPress site this plugin will sync to.', 'rest-in-sync' ) . '</p>' ),
 
@@ -117,6 +121,11 @@ class Rest_In_Sync_Settings {
 		) );
 	}
 
+	/** Whether this site is configured as the remote/target side of a sync pair — see the field's help text for what that disables. */
+	public static function is_remote_server() {
+		return (bool) self::get_option( self::OPTION_IS_REMOTE_SERVER );
+	}
+
 	public static function get_site_url() {
 		return self::get_option( self::OPTION_SITE_URL );
 	}
@@ -127,6 +136,13 @@ class Rest_In_Sync_Settings {
 
 	public static function get_app_password() {
 		return self::get_option( self::OPTION_APP_PASSWORD );
+	}
+
+	/** Whether enough connection details are filled in to attempt talking to the remote site at all. */
+	public static function is_connection_configured() {
+		return '' !== trim( (string) self::get_site_url() )
+			&& '' !== trim( (string) self::get_username() )
+			&& '' !== trim( (string) self::get_app_password() );
 	}
 
 	public static function logging_enabled() {

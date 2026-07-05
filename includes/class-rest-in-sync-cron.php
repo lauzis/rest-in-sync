@@ -101,9 +101,18 @@ class Rest_In_Sync_Cron {
 
 	/**
 	 * Reschedules the batch sync event if the configured interval has changed
-	 * since it was last scheduled (e.g. after a Settings update).
+	 * since it was last scheduled (e.g. after a Settings update). Clears (and
+	 * never re-adds) the scheduled event on a site marked as the remote server
+	 * of a sync pair — that site is only ever a destination, never the one
+	 * initiating batch checks.
 	 */
 	public static function maybe_reschedule() {
+		if ( Rest_In_Sync_Settings::is_remote_server() ) {
+			wp_clear_scheduled_hook( self::HOOK );
+
+			return;
+		}
+
 		$desired_schedule = self::schedule_name( Rest_In_Sync_Settings::get_cron_interval() );
 		$scheduled_event  = wp_get_scheduled_event( self::HOOK );
 

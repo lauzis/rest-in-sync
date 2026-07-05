@@ -57,6 +57,14 @@ class Rest_In_Sync_Sync_Checker {
 	 * @return array{remote_id:int, rows:array[]}|WP_Error
 	 */
 	public function get_comparison( WP_Post $post ) {
+		if ( Rest_In_Sync_Settings::is_remote_server() ) {
+			return $this->remote_server_error();
+		}
+
+		if ( ! Rest_In_Sync_Settings::is_connection_configured() ) {
+			return $this->not_configured_error();
+		}
+
 		$remote_id = $this->get_or_find_remote_id( $post );
 
 		if ( ! $remote_id ) {
@@ -87,6 +95,14 @@ class Rest_In_Sync_Sync_Checker {
 	 * @return true|WP_Error
 	 */
 	public function push_to_remote( WP_Post $post, array $selected_keys ) {
+		if ( Rest_In_Sync_Settings::is_remote_server() ) {
+			return $this->remote_server_error();
+		}
+
+		if ( ! Rest_In_Sync_Settings::is_connection_configured() ) {
+			return $this->not_configured_error();
+		}
+
 		$remote_id = $this->get_or_find_remote_id( $post );
 
 		if ( ! $remote_id ) {
@@ -139,6 +155,20 @@ class Rest_In_Sync_Sync_Checker {
 		return true;
 	}
 
+	private function not_configured_error() {
+		return new WP_Error(
+			'rest_in_sync_not_configured',
+			__( 'The remote site connection has not been configured yet. Please fill in the Site URL, Username, and Application Password on the Settings page.', 'rest-in-sync' )
+		);
+	}
+
+	private function remote_server_error() {
+		return new WP_Error(
+			'rest_in_sync_is_remote_server',
+			__( 'This site is configured as the remote server of a sync pair, so it never initiates its own sync checks or pushes.', 'rest-in-sync' )
+		);
+	}
+
 	private function get_or_find_remote_id( WP_Post $post ) {
 		$remote_id = (int) get_post_meta( $post->ID, self::META_REMOTE_ID, true );
 
@@ -175,6 +205,10 @@ class Rest_In_Sync_Sync_Checker {
 	}
 
 	public function run_batch() {
+		if ( Rest_In_Sync_Settings::is_remote_server() || ! Rest_In_Sync_Settings::is_connection_configured() ) {
+			return;
+		}
+
 		$post_types = Rest_In_Sync_Settings::get_post_types_to_sync();
 
 		if ( empty( $post_types ) ) {
@@ -262,6 +296,10 @@ class Rest_In_Sync_Sync_Checker {
 	}
 
 	private function check_post( WP_Post $post ) {
+		if ( Rest_In_Sync_Settings::is_remote_server() || ! Rest_In_Sync_Settings::is_connection_configured() ) {
+			return;
+		}
+
 		if ( ! get_post_meta( $post->ID, self::META_UUID, true ) ) {
 			update_post_meta( $post->ID, self::META_UUID, wp_generate_uuid4() );
 			update_post_meta( $post->ID, self::META_STATUS, self::STATUS_NEVER_SYNCED );

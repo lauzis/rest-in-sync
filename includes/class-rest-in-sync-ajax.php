@@ -96,6 +96,10 @@ class Rest_In_Sync_Ajax {
 			wp_send_json_error( array( 'message' => __( 'Post not found.', 'rest-in-sync' ) ) );
 		}
 
+		if ( Rest_In_Sync_Settings::is_remote_server() ) {
+			wp_send_json_error( array( 'message' => __( 'This site is configured as the remote server of a sync pair, so it never initiates its own sync checks.', 'rest-in-sync' ) ) );
+		}
+
 		( new Rest_In_Sync_Sync_Checker() )->check_single( $post );
 
 		$status       = get_post_meta( $post->ID, Rest_In_Sync_Sync_Checker::META_STATUS, true );

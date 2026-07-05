@@ -10,6 +10,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 	<p>
 		<?php esc_html_e( 'REST in Sync talks to your live WordPress site using the built-in WordPress REST API (wp-json). It does not require a companion plugin on the remote site — any modern WordPress install with the REST API enabled will work, though running REST in Sync on both sites makes post matching more resilient (see "Cron sync checks" below).', 'rest-in-sync' ); ?>
 	</p>
+	<p>
+		<?php esc_html_e( 'When REST in Sync runs on both sites, check "This is the remote server" in Settings on the live/target site only. That disables its own sync cron and manual sync actions (it should never initiate checks or pushes against yet another site), while keeping the meta-fetching REST route it serves for the other site\'s benefit fully active.', 'rest-in-sync' ); ?>
+	</p>
 
 	<h2><?php esc_html_e( 'Setting up the connection', 'rest-in-sync' ); ?></h2>
 

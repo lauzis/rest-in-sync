@@ -43,6 +43,13 @@ wp_localize_script( 'rest-in-sync-sync', 'risSync', array(
 	<h1 class="wp-heading-inline"><?php esc_html_e( 'Sync', 'rest-in-sync' ); ?></h1>
 	<hr class="wp-header-end">
 
+	<?php if ( Rest_In_Sync_Settings::is_remote_server() ) : ?>
+		<div class="notice notice-info inline" style="margin-top:20px;">
+			<p><?php esc_html_e( 'This site is configured as the remote server of a sync pair (see Settings), so it never runs its own sync checks — it only serves as a destination for another site\'s checks and pushes.', 'rest-in-sync' ); ?></p>
+		</div>
+	</div>
+	<?php return; endif; ?>
+
 	<form method="get" style="margin:16px 0;">
 		<input type="hidden" name="page" value="<?php echo esc_attr( Rest_In_Sync_Admin_Menu::MENU_SLUG ); ?>">
 		<p class="search-box" style="margin:0;">

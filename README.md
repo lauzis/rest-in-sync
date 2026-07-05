@@ -13,6 +13,16 @@ The plugin registers a top-level **REST in Sync** menu with the following pages:
 | Logs | Shows daily log files of sync and connection test activity, with a file selector and a "Clear all logs" button. |
 | Settings | Carbon Fields powered form to configure the remote site connection, which post types to sync, with a "Test Connection" button and an "Enable logging" toggle. |
 
+## Two-way installs and the "remote server" setting
+
+Since REST in Sync's own REST routes (the UUID-linking meta and the all-meta route below) are served by whichever site runs this plugin, the usual setup is to install it on **both** sites in a sync pair. The Settings page's **"This is the remote server"** checkbox marks a site as the pair's live/target side only:
+
+- Its own sync cron job never gets scheduled (`Rest_In_Sync_Cron::maybe_reschedule()` clears any existing scheduled event instead).
+- Its Sync/Details pages' manual actions (Check Now, Resync Now, Push to Remote) are disabled with a clear message, and the Sync page shows an explanatory notice instead of an out-of-sync list.
+- Its `/wp-json/rest-in-sync/v1/meta/{id}` route (see "Sync Details page" below, which covers what this route is for) keeps working regardless — that's what makes it useful as a remote target in the first place.
+
+Leave it unchecked on the site that's actually driving the sync (the one with Site URL/Username/Application Password filled in and cron enabled).
+
 ## Connecting to a live site
 
 The Settings page collects the live site's URL, a WordPress username, and an [Application Password](https://make.wordpress.org/core/2020/11/05/application-passwords-integration-guide/) for that user. Requests to the remote site are authenticated with HTTP Basic Auth using those credentials.
@@ -33,6 +43,8 @@ For the connection to work, the remote (live) site needs:
 The **Post Types to Sync** field on the Settings page lists every post type registered on this site that supports the REST API, so you can choose which ones get checked and validated. Posts and Pages are checked by default.
 
 ## Sync status cron job
+
+The Site URL, Username, and Application Password on the Settings page must all be filled in before any of this runs — the cron job, "Check Now"/"Resync Now", the Sync Details comparison, and "Push to Remote" all no-op (returning a clear "not configured" message for the manual actions) until the connection is fully configured, rather than attempting requests against a blank or partial URL.
 
 A WP-Cron job periodically compares each syncable post against its counterpart on the remote site and records whether it's in sync. A post is matched to a remote post by slug (falling back to a scan for a matching GUID or UUID), and the first time a match is found, the post's UUID is written back onto the matched remote post's `_rest_in_sync_uuid` meta over REST. From then on, lookups can match by that shared UUID even if the local slug later changes — slug/GUID alone can't recover from that drift, since neither is guaranteed to stay identical between the two sites.
 

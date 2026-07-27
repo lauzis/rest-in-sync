@@ -5,7 +5,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 /**
  * Handles the plugin's AJAX requests: "Test Connection" on the Settings page,
- * and the field-setting toggles and "Push to Remote" action on the Details page.
+ * and the field-setting toggles and "Push to Remote"/"Pull from Remote" actions
+ * on the Details page.
  */
 class Rest_In_Sync_Ajax {
 
@@ -16,8 +17,12 @@ class Rest_In_Sync_Ajax {
 	const NONCE_ACTION_DETAILS = 'rest_in_sync_details';
 
 	const ACTION_PUSH                 = 'rest_in_sync_push_fields';
-	const ACTION_UPDATE_FIELD_SETTING = 'rest_in_sync_update_field_setting';
-	const ACTION_CHECK_NOW            = 'rest_in_sync_check_now';
+	const ACTION_PULL                 = 'rest_in_sync_pull_fields';
+	const ACTION_UPDATE_FIELD_SETTING  = 'rest_in_sync_update_field_setting';
+	const ACTION_CHECK_NOW             = 'rest_in_sync_check_now';
+	const ACTION_IGNORE                = 'rest_in_sync_ignore_until_next_check';
+	const ACTION_UPDATE_FIELD_PATTERN  = 'rest_in_sync_update_field_pattern';
+	const ACTION_DELETE_FIELD_PATTERN  = 'rest_in_sync_delete_field_pattern';
 
 	/** Nonce action for the Sync page's AJAX requests. */
 	const NONCE_ACTION_SYNC = 'rest_in_sync_sync_page';
@@ -25,8 +30,12 @@ class Rest_In_Sync_Ajax {
 	public function __construct() {
 		add_action( 'wp_ajax_' . self::ACTION, array( $this, 'handle_test_connection' ) );
 		add_action( 'wp_ajax_' . self::ACTION_PUSH, array( $this, 'handle_push_fields' ) );
+		add_action( 'wp_ajax_' . self::ACTION_PULL, array( $this, 'handle_pull_fields' ) );
 		add_action( 'wp_ajax_' . self::ACTION_UPDATE_FIELD_SETTING, array( $this, 'handle_update_field_setting' ) );
 		add_action( 'wp_ajax_' . self::ACTION_CHECK_NOW, array( $this, 'handle_check_now' ) );
+		add_action( 'wp_ajax_' . self::ACTION_IGNORE, array( $this, 'handle_ignore_until_next_check' ) );
+		add_action( 'wp_ajax_' . self::ACTION_UPDATE_FIELD_PATTERN, array( $this, 'handle_update_field_pattern' ) );
+		add_action( 'wp_ajax_' . self::ACTION_DELETE_FIELD_PATTERN, array( $this, 'handle_delete_field_pattern' ) );
 	}
 
 	public function handle_test_connection() {
@@ -81,6 +90,38 @@ class Rest_In_Sync_Ajax {
 		wp_send_json_success( array( 'message' => __( 'Selected fields were pushed to the remote site.', 'rest-in-sync' ) ) );
 	}
 
+	/** Pulls the checked fields on the Details page from the remote post onto this one. */
+	public function handle_pull_fields() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => __( 'You are not allowed to do this.', 'rest-in-sync' ) ), 403 );
+		}
+
+		check_ajax_referer( self::NONCE_ACTION_DETAILS, 'nonce' );
+
+		$post_id = isset( $_POST['post_id'] ) ? absint( $_POST['post_id'] ) : 0;
+		$fields  = isset( $_POST['fields'] ) && is_array( $_POST['fields'] )
+			? array_map( 'sanitize_text_field', wp_unslash( $_POST['fields'] ) )
+			: array();
+
+		$post = $post_id ? get_post( $post_id ) : null;
+
+		if ( ! $post ) {
+			wp_send_json_error( array( 'message' => __( 'Post not found.', 'rest-in-sync' ) ) );
+		}
+
+		if ( empty( $fields ) ) {
+			wp_send_json_error( array( 'message' => __( 'No fields were selected to pull.', 'rest-in-sync' ) ) );
+		}
+
+		$result = ( new Rest_In_Sync_Sync_Checker() )->pull_from_remote( $post, $fields );
+
+		if ( is_wp_error( $result ) ) {
+			wp_send_json_error( array( 'message' => $result->get_error_message() ) );
+		}
+
+		wp_send_json_success( array( 'message' => __( 'Selected fields were pulled from the remote site.', 'rest-in-sync' ) ) );
+	}
+
 	/** Re-runs the sync check for a single post, e.g. from the "Check Now" button on the Sync page. */
 	public function handle_check_now() {
 		if ( ! current_user_can( 'manage_options' ) ) {
@@ -123,6 +164,29 @@ class Rest_In_Sync_Ajax {
 		) );
 	}
 
+	/**
+	 * Snoozes a post's out-of-sync status until the next check runs for it,
+	 * from the "Ignore Until Next Sync" button on the Sync or Details page.
+	 */
+	public function handle_ignore_until_next_check() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => __( 'You are not allowed to do this.', 'rest-in-sync' ) ), 403 );
+		}
+
+		check_ajax_referer( self::NONCE_ACTION_SYNC, 'nonce' );
+
+		$post_id = isset( $_POST['post_id'] ) ? absint( $_POST['post_id'] ) : 0;
+		$post    = $post_id ? get_post( $post_id ) : null;
+
+		if ( ! $post ) {
+			wp_send_json_error( array( 'message' => __( 'Post not found.', 'rest-in-sync' ) ) );
+		}
+
+		( new Rest_In_Sync_Sync_Checker() )->ignore_until_next_check( $post );
+
+		wp_send_json_success( array( 'message' => __( 'This post will be ignored until the next sync check.', 'rest-in-sync' ) ) );
+	}
+
 	/** Toggles a field's "don't sync by default" / "don't use in diff" setting. */
 	public function handle_update_field_setting() {
 		if ( ! current_user_can( 'manage_options' ) ) {
@@ -147,5 +211,45 @@ class Rest_In_Sync_Ajax {
 		$updated = Rest_In_Sync_Field_Settings::update_field( $field, $setting, $value );
 
 		wp_send_json_success( array( 'setting' => $updated ) );
+	}
+
+	/** Adds or updates a wildcard pattern rule from the Field Settings page. */
+	public function handle_update_field_pattern() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => __( 'You are not allowed to do this.', 'rest-in-sync' ) ), 403 );
+		}
+
+		check_ajax_referer( self::NONCE_ACTION_DETAILS, 'nonce' );
+
+		$pattern           = isset( $_POST['pattern'] ) ? sanitize_text_field( wp_unslash( $_POST['pattern'] ) ) : '';
+		$exclude_from_sync = ! empty( $_POST['exclude_from_sync'] );
+		$exclude_from_diff = ! empty( $_POST['exclude_from_diff'] );
+
+		if ( '' === $pattern ) {
+			wp_send_json_error( array( 'message' => __( 'Enter a pattern first.', 'rest-in-sync' ) ) );
+		}
+
+		$rule = Rest_In_Sync_Field_Settings::save_pattern_rule( $pattern, $exclude_from_sync, $exclude_from_diff );
+
+		wp_send_json_success( array( 'pattern' => $pattern, 'rule' => $rule ) );
+	}
+
+	/** Removes a wildcard pattern rule from the Field Settings page. */
+	public function handle_delete_field_pattern() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => __( 'You are not allowed to do this.', 'rest-in-sync' ) ), 403 );
+		}
+
+		check_ajax_referer( self::NONCE_ACTION_DETAILS, 'nonce' );
+
+		$pattern = isset( $_POST['pattern'] ) ? sanitize_text_field( wp_unslash( $_POST['pattern'] ) ) : '';
+
+		if ( '' === $pattern ) {
+			wp_send_json_error( array( 'message' => __( 'Invalid pattern.', 'rest-in-sync' ) ) );
+		}
+
+		Rest_In_Sync_Field_Settings::delete_pattern_rule( $pattern );
+
+		wp_send_json_success();
 	}
 }

@@ -14,6 +14,7 @@ class Rest_In_Sync_Sync_Checker {
 	const META_STATUS       = '_rest_in_sync_status';
 	const META_LAST_CHECKED = '_rest_in_sync_last_checked';
 	const META_DIFF_ID      = '_rest_in_sync_diff_id';
+	const META_IGNORED      = '_rest_in_sync_ignored';
 
 	const STATUS_NEVER_SYNCED = 'never_synced';
 	const STATUS_IN_SYNC      = 'in_sync';
@@ -50,11 +51,21 @@ class Rest_In_Sync_Sync_Checker {
 	}
 
 	/**
+	 * Snoozes this post's out-of-sync status until the next check (cron or
+	 * manual) runs for it — that check clears the flag again regardless of
+	 * its outcome, so this is a one-time "stop bothering me about this until
+	 * you've actually looked again" rather than a permanent dismissal.
+	 */
+	public function ignore_until_next_check( WP_Post $post ) {
+		update_post_meta( $post->ID, self::META_IGNORED, '1' );
+	}
+
+	/**
 	 * Builds a live, full field-by-field comparison against the remote post for
 	 * the Details view, including fields with equal values and fields excluded
 	 * from the diff calculation (which still stay visible there).
 	 *
-	 * @return array{remote_id:int, rows:array[]}|WP_Error
+	 * @return array{remote_id:int, remote_url:string, local_edit_url:string, remote_edit_url:string, local_revision_url:string, remote_revision_url:string, rows:array[]}|WP_Error
 	 */
 	public function get_comparison( WP_Post $post ) {
 		if ( Rest_In_Sync_Settings::is_remote_server() ) {
@@ -81,10 +92,28 @@ class Rest_In_Sync_Sync_Checker {
 			return $remote_post;
 		}
 
+		$remote_home        = untrailingslashit( trim( (string) Rest_In_Sync_Settings::get_site_url() ) );
+		$local_revision_id  = $this->get_local_latest_revision_id( $post );
+		$remote_revision_id = $this->fetch_remote_latest_revision_id( $post->post_type, $remote_id );
+
 		return array(
-			'remote_id' => $remote_id,
-			'rows'      => $this->compare_all_fields( $post, $remote_post, $remote_id ),
+			'remote_id'           => $remote_id,
+			'remote_url'          => isset( $remote_post['link'] ) ? $remote_post['link'] : '',
+			'local_edit_url'      => (string) get_edit_post_link( $post->ID, 'raw' ),
+			'remote_edit_url'     => $remote_home . '/wp-admin/post.php?post=' . $remote_id . '&action=edit',
+			'local_revision_url'  => $local_revision_id ? admin_url( 'revision.php?revision=' . $local_revision_id ) : '',
+			'remote_revision_url' => $remote_revision_id ? $remote_home . '/wp-admin/revision.php?revision=' . $remote_revision_id : '',
+			'rows'                => $this->compare_all_fields( $post, $remote_post, $remote_id ),
 		);
+	}
+
+	/**
+	 * @return int The local post's most recent revision ID, or 0 if it has none yet.
+	 */
+	private function get_local_latest_revision_id( WP_Post $post ) {
+		$revisions = wp_get_post_revisions( $post->ID, array( 'numberposts' => 1, 'fields' => 'ids' ) );
+
+		return $revisions ? (int) reset( $revisions ) : 0;
 	}
 
 	/**
@@ -144,9 +173,109 @@ class Rest_In_Sync_Sync_Checker {
 			return $response;
 		}
 
+		if ( ! empty( $meta ) ) {
+			$this->push_remote_meta( $post->ID, $remote_id, $meta );
+		}
+
 		Rest_In_Sync_Logs::add_log(
 			'push_to_remote',
 			sprintf( 'Pushed %d field(s) for post #%d', count( $selected_keys ), $post->ID ),
+			array( 'post_id' => $post->ID, 'fields' => $selected_keys )
+		);
+
+		$this->check_post( $post );
+
+		return true;
+	}
+
+	/**
+	 * Pulls the selected fields/meta from the remote post onto this local
+	 * post, then re-runs the sync check so its status and diff reflect the
+	 * new state. The mirror image of push_to_remote(): same field selection,
+	 * same home-URL rewrite (in the opposite direction), but writing to this
+	 * site via wp_update_post()/update_post_meta() instead of a remote REST call.
+	 *
+	 * @param string[] $selected_keys Field/meta keys to pull, as returned by get_comparison().
+	 * @return true|WP_Error
+	 */
+	public function pull_from_remote( WP_Post $post, array $selected_keys ) {
+		if ( Rest_In_Sync_Settings::is_remote_server() ) {
+			return $this->remote_server_error();
+		}
+
+		if ( ! Rest_In_Sync_Settings::is_connection_configured() ) {
+			return $this->not_configured_error();
+		}
+
+		$remote_id = $this->get_or_find_remote_id( $post );
+
+		if ( ! $remote_id ) {
+			Rest_In_Sync_Logs::add_error( 'pull_from_remote', 'No matching post was found on the remote site.', array( 'post_id' => $post->ID ) );
+
+			return new WP_Error( 'rest_in_sync_no_remote_match', __( 'No matching post was found on the remote site.', 'rest-in-sync' ) );
+		}
+
+		$remote_post = $this->fetch_remote_post( $post->post_type, $remote_id );
+
+		if ( is_wp_error( $remote_post ) ) {
+			Rest_In_Sync_Logs::add_error( 'pull_from_remote', $remote_post->get_error_message(), array( 'post_id' => $post->ID, 'remote_id' => $remote_id ) );
+
+			return $remote_post;
+		}
+
+		$local_home  = home_url();
+		$remote_home = Rest_In_Sync_Settings::get_site_url();
+
+		$standard_field_map = array(
+			'title'   => 'post_title',
+			'content' => 'post_content',
+			'excerpt' => 'post_excerpt',
+			'status'  => 'post_status',
+		);
+
+		$postarr      = array( 'ID' => $post->ID );
+		$meta_updates = array();
+		$remote_meta  = null;
+
+		foreach ( $selected_keys as $key ) {
+			if ( isset( $standard_field_map[ $key ] ) ) {
+				$value = 'status' === $key
+					? ( isset( $remote_post['status'] ) ? $remote_post['status'] : $post->post_status )
+					: $this->remote_field_value( $remote_post, $key );
+
+				$postarr[ $standard_field_map[ $key ] ] = 'status' === $key ? $value : $this->rewrite_home_url( $value, $remote_home, $local_home );
+			} else {
+				if ( null === $remote_meta ) {
+					$remote_meta = $this->get_remote_meta_map( $remote_post, $remote_id );
+				}
+
+				if ( array_key_exists( $key, $remote_meta ) ) {
+					$meta_updates[ $key ] = $this->rewrite_home_url( $remote_meta[ $key ], $remote_home, $local_home );
+				}
+			}
+		}
+
+		if ( count( $postarr ) <= 1 && empty( $meta_updates ) ) {
+			return new WP_Error( 'rest_in_sync_no_fields', __( 'No fields were selected to pull.', 'rest-in-sync' ) );
+		}
+
+		if ( count( $postarr ) > 1 ) {
+			$updated = wp_update_post( wp_slash( $postarr ), true );
+
+			if ( is_wp_error( $updated ) ) {
+				Rest_In_Sync_Logs::add_error( 'pull_from_remote', $updated->get_error_message(), array( 'post_id' => $post->ID ) );
+
+				return $updated;
+			}
+		}
+
+		foreach ( $meta_updates as $meta_key => $meta_value ) {
+			update_post_meta( $post->ID, $meta_key, $meta_value );
+		}
+
+		Rest_In_Sync_Logs::add_log(
+			'pull_from_remote',
+			sprintf( 'Pulled %d field(s) for post #%d', count( $selected_keys ), $post->ID ),
 			array( 'post_id' => $post->ID, 'fields' => $selected_keys )
 		);
 
@@ -201,6 +330,26 @@ class Rest_In_Sync_Sync_Checker {
 
 		if ( is_wp_error( $response ) ) {
 			Rest_In_Sync_Logs::add_error( 'stamp_remote_uuid', $response->get_error_message(), array( 'post_id' => $post->ID, 'remote_id' => $remote_id ) );
+		}
+	}
+
+	/**
+	 * Writes meta onto the remote post via this plugin's own
+	 * '/rest-in-sync/v1/meta/{id}' route, bypassing register_meta()/
+	 * show_in_rest — the standard REST API silently drops any meta key in a
+	 * post update's 'meta' object that isn't registered for REST, which is
+	 * most of them (most ACF fields, etc.), so pushing an unregistered meta
+	 * key via the normal endpoint alone has no effect at all. A failure here
+	 * is logged but doesn't fail the overall push, since the standard fields
+	 * (if any were selected) already succeeded, and the remote might simply
+	 * be running an older plugin version without this route.
+	 */
+	private function push_remote_meta( $post_id, $remote_id, array $meta ) {
+		$endpoint = trailingslashit( trim( (string) Rest_In_Sync_Settings::get_site_url() ) ) . 'wp-json/rest-in-sync/v1/meta/' . $remote_id;
+		$response = $this->remote_post( $endpoint, array( 'meta' => $meta ) );
+
+		if ( is_wp_error( $response ) ) {
+			Rest_In_Sync_Logs::add_error( 'push_remote_meta', $response->get_error_message(), array( 'post_id' => $post_id, 'remote_id' => $remote_id ) );
 		}
 	}
 
@@ -338,6 +487,11 @@ class Rest_In_Sync_Sync_Checker {
 		update_post_meta( $post->ID, self::META_STATUS, $status );
 		update_post_meta( $post->ID, self::META_LAST_CHECKED, time() );
 
+		// "Ignore until next sync" is a one-time snooze: every completed check
+		// consumes it, regardless of outcome, so a post that's still out of
+		// sync next time reappears rather than staying hidden indefinitely.
+		delete_post_meta( $post->ID, self::META_IGNORED );
+
 		if ( self::STATUS_OUT_OF_SYNC === $status ) {
 			update_post_meta( $post->ID, self::META_DIFF_ID, $this->write_diff_file( $post, $diff ) );
 		} else {
@@ -402,6 +556,12 @@ class Rest_In_Sync_Sync_Checker {
 			'lang'      => $lang,
 		) );
 
+		$remote_id = $this->find_remote_id_by_exact_id( $rest_base, $post->ID );
+
+		if ( $remote_id ) {
+			return $remote_id;
+		}
+
 		$remote_id = $this->find_remote_id_by_slug( $rest_base, $post->post_name, $lang );
 
 		if ( $remote_id ) {
@@ -411,7 +571,7 @@ class Rest_In_Sync_Sync_Checker {
 		$remote_id = $this->find_remote_id_by_guid_or_uuid( $rest_base, $post->guid, $uuid, $lang );
 
 		if ( ! $remote_id ) {
-			Rest_In_Sync_Logs::add_log( 'find_remote_id', 'No remote post matched slug, GUID, or UUID', array(
+			Rest_In_Sync_Logs::add_log( 'find_remote_id', 'No remote post matched ID, slug, GUID, or UUID', array(
 				'post_id'   => $post->ID,
 				'rest_base' => $rest_base,
 				'slug'      => $post->post_name,
@@ -422,6 +582,36 @@ class Rest_In_Sync_Sync_Checker {
 		}
 
 		return $remote_id;
+	}
+
+	/**
+	 * Tries the local post's own ID against the remote first, before slug or
+	 * GUID/UUID. Slug alone can't be trusted: WPML, for example, can give
+	 * multiple language translations of the same article the exact same slug,
+	 * distinguishing them only by a URL language prefix rather than the slug
+	 * itself, so a slug lookup can match the wrong translation. When this
+	 * site's install was cloned from (or otherwise shares history with) the
+	 * remote's database, the vast majority of existing content shares
+	 * identical post IDs, which sidesteps that ambiguity entirely. If no post
+	 * exists at this ID on the remote, it's treated as genuinely new content
+	 * and falls through to the slug/GUID/UUID lookups instead.
+	 */
+	private function find_remote_id_by_exact_id( $rest_base, $post_id ) {
+		if ( ! $post_id ) {
+			return 0;
+		}
+
+		$endpoint = $this->rest_endpoint( $rest_base ) . '/' . (int) $post_id;
+		$response = $this->remote_get( $endpoint, array(
+			'context' => 'edit',
+			'_fields' => 'id',
+		) );
+
+		if ( is_wp_error( $response ) || empty( $response['id'] ) ) {
+			return 0;
+		}
+
+		return (int) $response['id'];
 	}
 
 	/**
@@ -568,6 +758,28 @@ class Rest_In_Sync_Sync_Checker {
 	}
 
 	/**
+	 * The remote post's most recent revision ID, via WordPress core's own
+	 * '/revisions' REST route (same auth as everything else here). Used to
+	 * deep-link the Details page straight into the remote's revision
+	 * comparison screen instead of just the plain edit screen. Returns 0 if
+	 * the post has no revisions yet, or the lookup fails for any reason.
+	 */
+	private function fetch_remote_latest_revision_id( $post_type, $remote_id ) {
+		$endpoint = $this->rest_endpoint( $this->get_rest_base( $post_type ) ) . '/' . $remote_id . '/revisions';
+		$response = $this->remote_get( $endpoint, array(
+			'context'  => 'edit',
+			'per_page' => 1,
+			'_fields'  => 'id',
+		) );
+
+		if ( is_wp_error( $response ) || empty( $response[0]['id'] ) ) {
+			return 0;
+		}
+
+		return (int) $response[0]['id'];
+	}
+
+	/**
 	 * Fetches every meta key on the matched remote post via this plugin's own
 	 * '/rest-in-sync/v1/meta/{id}' route, bypassing the standard REST API's
 	 * show_in_rest restriction entirely. Requires the remote to be running a
@@ -588,6 +800,24 @@ class Rest_In_Sync_Sync_Checker {
 		}
 
 		return is_array( $response ) ? $response : array();
+	}
+
+	/**
+	 * Merges the standard REST 'meta' field with the all-meta route's response
+	 * (when available), giving the fullest possible view of the remote post's
+	 * meta. Shared by compare_all_fields() and pull_from_remote() so both see
+	 * exactly the same remote meta values.
+	 *
+	 * @return array meta_key => value
+	 */
+	private function get_remote_meta_map( array $remote, $remote_id ) {
+		$remote_meta = ( ! empty( $remote['meta'] ) && is_array( $remote['meta'] ) ) ? $remote['meta'] : array();
+
+		if ( $remote_id ) {
+			$remote_meta = array_merge( $remote_meta, $this->fetch_remote_all_meta( $remote_id ) );
+		}
+
+		return $remote_meta;
 	}
 
 	/**
@@ -660,12 +890,7 @@ class Rest_In_Sync_Sync_Checker {
 			);
 		}
 
-		$remote_meta = ( ! empty( $remote['meta'] ) && is_array( $remote['meta'] ) ) ? $remote['meta'] : array();
-
-		if ( $remote_id ) {
-			$remote_meta = array_merge( $remote_meta, $this->fetch_remote_all_meta( $remote_id ) );
-		}
-
+		$remote_meta      = $this->get_remote_meta_map( $remote, $remote_id );
 		$remote_meta_keys = array();
 
 		foreach ( $remote_meta as $meta_key => $remote_value ) {
@@ -728,12 +953,51 @@ class Rest_In_Sync_Sync_Checker {
 
 	/**
 	 * Compares two field/meta values for the diff, treating the local and
-	 * remote home URLs as interchangeable first. Internal links, image src's,
-	 * etc. always embed the site's own domain, so a raw string comparison
-	 * would flag nearly every field as "out of sync" for that reason alone.
+	 * remote home URLs as interchangeable first (internal links, image src's,
+	 * etc. always embed the site's own domain), then un-escaping JSON's
+	 * optional slash-escaping, then stripping whitespace entirely. Comparison-
+	 * only — the Details view always shows the real, unmodified saved value,
+	 * via $row['local']/$row['remote'].
 	 */
 	private function values_differ( $local_value, $remote_value ) {
-		return $this->normalize_home_urls( (string) $local_value ) !== $this->normalize_home_urls( (string) $remote_value );
+		return $this->normalize_whitespace( $this->normalize_json_slashes( $this->normalize_home_urls( $this->stringify_for_diff( $local_value ) ) ) )
+			!== $this->normalize_whitespace( $this->normalize_json_slashes( $this->normalize_home_urls( $this->stringify_for_diff( $remote_value ) ) ) );
+	}
+
+	/**
+	 * Strips every whitespace character entirely — not just collapsing runs
+	 * to one space. A pretty-printed vs. minified JSON blob (e.g. a Gutenberg
+	 * block comment's attributes) differs by single spaces around colons and
+	 * commas, which collapsing runs down to one space wouldn't fix.
+	 */
+	private function normalize_whitespace( $value ) {
+		return preg_replace( '/\s+/', '', $value );
+	}
+
+	/**
+	 * Un-escapes JSON's optional "\/" slash-escaping to a plain "/" — "\/" and
+	 * "/" decode to the identical character, it's purely a serializer choice,
+	 * but different WordPress/block-editor versions disagree on it. Shows up
+	 * as a diff in any field/meta value that embeds JSON, e.g. a Gutenberg
+	 * block's attributes (`"acf\/some-block"` vs `"acf/some-block"`).
+	 */
+	private function normalize_json_slashes( $value ) {
+		return str_replace( '\\/', '/', $value );
+	}
+
+	/**
+	 * Casting an array/object value with (string) yields the literal string
+	 * "Array" (plus a PHP warning) — meaning any two array-valued meta fields
+	 * (ACF repeaters, etc.) would always compare as identical regardless of
+	 * their actual content. JSON-encoding instead keeps the comparison — and
+	 * the diff shown on the Details page — meaningful for structured values too.
+	 */
+	private function stringify_for_diff( $value ) {
+		if ( is_array( $value ) || is_object( $value ) ) {
+			return (string) wp_json_encode( $value );
+		}
+
+		return (string) $value;
 	}
 
 	/**

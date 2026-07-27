@@ -65,6 +65,16 @@ class Rest_In_Sync_Admin_Menu {
 				true
 			);
 		}
+
+		if ( strpos( (string) $hook_suffix, self::MENU_SLUG . '-field-settings' ) !== false ) {
+			wp_enqueue_script(
+				'rest-in-sync-field-settings',
+				REST_IN_SYNC_URL . 'assets/js/field-settings.js',
+				array( 'jquery', 'rest-in-sync-toast' ),
+				REST_IN_SYNC_VERSION,
+				true
+			);
+		}
 	}
 
 	public function register_menu() {
@@ -105,6 +115,15 @@ class Rest_In_Sync_Admin_Menu {
 			array( $this, 'render_logs_page' )
 		);
 
+		add_submenu_page(
+			self::MENU_SLUG,
+			__( 'Field Settings', 'rest-in-sync' ),
+			__( 'Field Settings', 'rest-in-sync' ),
+			'manage_options',
+			self::MENU_SLUG . '-field-settings',
+			array( $this, 'render_field_settings_page' )
+		);
+
 		// Parent slug null keeps the diff details page out of the menu; it's only ever reached via the "Details" link on the Sync page.
 		add_submenu_page(
 			null,
@@ -126,6 +145,10 @@ class Rest_In_Sync_Admin_Menu {
 
 	public function render_logs_page() {
 		require REST_IN_SYNC_DIR . 'includes/views/logs.php';
+	}
+
+	public function render_field_settings_page() {
+		require REST_IN_SYNC_DIR . 'includes/views/field-settings.php';
 	}
 
 	public function render_diff_page() {

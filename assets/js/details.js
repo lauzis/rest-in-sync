@@ -118,10 +118,41 @@
 			} );
 		} );
 
-		$( '#ris-push' ).on( 'click', function () {
+		$( '#ris-ignore' ).on( 'click', function () {
 			var $btn     = $( this );
-			var $spinner = $( '#ris-push-spinner' );
-			var fields   = $table.find( '.ris-field-checkbox:checked' ).map( function () {
+			var $spinner = $( '#ris-ignore-spinner' );
+
+			$btn.prop( 'disabled', true ).text( risDetails.i18n.ignoring );
+			$spinner.addClass( 'is-active' );
+
+			$.post( risDetails.ajaxUrl, {
+				action: 'rest_in_sync_ignore_until_next_check',
+				nonce: risDetails.resyncNonce,
+				post_id: risDetails.postId
+			} ).done( function ( response ) {
+				var success = response && response.success;
+				var message = ( response && response.data && response.data.message ) || risDetails.i18n.error;
+
+				showToast( message, success ? 'success' : 'error' );
+
+				if ( success ) {
+					window.location.href = risDetails.syncUrl;
+					return;
+				}
+
+				$btn.prop( 'disabled', false ).text( risDetails.i18n.ignore );
+				$spinner.removeClass( 'is-active' );
+			} ).fail( function () {
+				showToast( risDetails.i18n.error, 'error' );
+				$btn.prop( 'disabled', false ).text( risDetails.i18n.ignore );
+				$spinner.removeClass( 'is-active' );
+			} );
+		} );
+
+		function syncFields( options ) {
+			var $btn     = options.$button || $( options.buttonSelector );
+			var $spinner = options.spinnerSelector ? $( options.spinnerSelector ) : $();
+			var fields   = options.fields || $table.find( '.ris-field-checkbox:checked' ).map( function () {
 				return $( this ).val();
 			} ).get();
 
@@ -130,25 +161,84 @@
 				return;
 			}
 
+			if ( ! window.confirm( options.confirmMessage ) ) {
+				return;
+			}
+
 			$btn.prop( 'disabled', true );
 			$spinner.addClass( 'is-active' );
 
 			$.post( risDetails.ajaxUrl, {
-				action: 'rest_in_sync_push_fields',
+				action: options.action,
 				nonce: risDetails.nonce,
 				post_id: risDetails.postId,
 				fields: fields
 			} ).done( function ( response ) {
 				var success = response && response.success;
 				var message = ( response && response.data && response.data.message )
-					|| ( success ? risDetails.i18n.pushSuccess : risDetails.i18n.error );
+					|| ( success ? options.successMessage : risDetails.i18n.error );
 
 				showToast( message, success ? 'success' : 'error' );
-			} ).fail( function () {
-				showToast( risDetails.i18n.error, 'error' );
-			} ).always( function () {
+
+				if ( success ) {
+					window.location.reload();
+					return;
+				}
+
 				$btn.prop( 'disabled', false );
 				$spinner.removeClass( 'is-active' );
+			} ).fail( function () {
+				showToast( risDetails.i18n.error, 'error' );
+				$btn.prop( 'disabled', false );
+				$spinner.removeClass( 'is-active' );
+			} );
+		}
+
+		$( '#ris-push' ).on( 'click', function () {
+			syncFields( {
+				buttonSelector: '#ris-push',
+				spinnerSelector: '#ris-push-spinner',
+				action: 'rest_in_sync_push_fields',
+				confirmMessage: risDetails.i18n.pushConfirm,
+				successMessage: risDetails.i18n.pushSuccess
+			} );
+		} );
+
+		$( '#ris-pull' ).on( 'click', function () {
+			syncFields( {
+				buttonSelector: '#ris-pull',
+				spinnerSelector: '#ris-pull-spinner',
+				action: 'rest_in_sync_pull_fields',
+				confirmMessage: risDetails.i18n.pullConfirm,
+				successMessage: risDetails.i18n.pullSuccess
+			} );
+		} );
+
+		$table.on( 'click', '.ris-push-field', function () {
+			var $btn  = $( this );
+			var field = $btn.data( 'field' );
+			var label = $btn.data( 'label' );
+
+			syncFields( {
+				$button: $btn,
+				action: 'rest_in_sync_push_fields',
+				confirmMessage: risDetails.i18n.pushFieldConfirm.replace( '%s', label ),
+				successMessage: risDetails.i18n.pushSuccess,
+				fields: [ field ]
+			} );
+		} );
+
+		$table.on( 'click', '.ris-pull-field', function () {
+			var $btn  = $( this );
+			var field = $btn.data( 'field' );
+			var label = $btn.data( 'label' );
+
+			syncFields( {
+				$button: $btn,
+				action: 'rest_in_sync_pull_fields',
+				confirmMessage: risDetails.i18n.pullFieldConfirm.replace( '%s', label ),
+				successMessage: risDetails.i18n.pullSuccess,
+				fields: [ field ]
 			} );
 		} );
 	} );

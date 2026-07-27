@@ -77,5 +77,42 @@
 				$spinner.removeClass( 'is-active' );
 			} );
 		} );
+
+		$table.on( 'click', '.ris-ignore', function () {
+			var $btn     = $( this );
+			var $row     = $btn.closest( 'tr' );
+			var $spinner = $row.find( '.ris-ignore-spinner' );
+			var postId   = $btn.data( 'post-id' );
+
+			$btn.prop( 'disabled', true ).text( risSync.i18n.ignoring );
+			$spinner.addClass( 'is-active' );
+
+			$.post( risSync.ajaxUrl, {
+				action: 'rest_in_sync_ignore_until_next_check',
+				nonce: risSync.nonce,
+				post_id: postId
+			} ).done( function ( response ) {
+				if ( ! response || ! response.success ) {
+					showToast( ( response && response.data && response.data.message ) || risSync.i18n.error, 'error' );
+					$btn.prop( 'disabled', false ).text( risSync.i18n.ignore );
+					$spinner.removeClass( 'is-active' );
+					return;
+				}
+
+				showToast( response.data.message, 'success' );
+
+				$row.fadeOut( 200, function () {
+					$row.remove();
+
+					if ( ! $table.find( 'tbody tr' ).length ) {
+						showEmptyNotice();
+					}
+				} );
+			} ).fail( function () {
+				showToast( risSync.i18n.error, 'error' );
+				$btn.prop( 'disabled', false ).text( risSync.i18n.ignore );
+				$spinner.removeClass( 'is-active' );
+			} );
+		} );
 	} );
 } )( jQuery );

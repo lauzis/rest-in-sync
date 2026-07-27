@@ -17,6 +17,10 @@ $query_args = array(
 			'key'   => Rest_In_Sync_Sync_Checker::META_STATUS,
 			'value' => Rest_In_Sync_Sync_Checker::STATUS_OUT_OF_SYNC,
 		),
+		array(
+			'key'     => Rest_In_Sync_Sync_Checker::META_IGNORED,
+			'compare' => 'NOT EXISTS',
+		),
 	),
 );
 
@@ -30,12 +34,14 @@ wp_localize_script( 'rest-in-sync-sync', 'risSync', array(
 	'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 	'nonce'   => wp_create_nonce( Rest_In_Sync_Ajax::NONCE_ACTION_SYNC ),
 	'i18n'    => array(
-		'error'    => __( 'Something went wrong. Please try again.', 'rest-in-sync' ),
-		'checking' => __( 'Checking…', 'rest-in-sync' ),
-		'checkNow' => __( 'Check Now', 'rest-in-sync' ),
-		'noneLeft' => __( 'Everything is in sync. No out-of-sync posts were found.', 'rest-in-sync' ),
-		'noDiff'   => __( 'No diff available', 'rest-in-sync' ),
-		'details'  => __( 'Details', 'rest-in-sync' ),
+		'error'          => __( 'Something went wrong. Please try again.', 'rest-in-sync' ),
+		'checking'       => __( 'Checking…', 'rest-in-sync' ),
+		'checkNow'       => __( 'Check Now', 'rest-in-sync' ),
+		'ignoring'       => __( 'Ignoring…', 'rest-in-sync' ),
+		'ignore'         => __( 'Ignore Until Next Sync', 'rest-in-sync' ),
+		'noneLeft'       => __( 'Everything is in sync. No out-of-sync posts were found.', 'rest-in-sync' ),
+		'noDiff'         => __( 'No diff available', 'rest-in-sync' ),
+		'details'        => __( 'Details', 'rest-in-sync' ),
 	),
 ) );
 ?>
@@ -82,6 +88,7 @@ wp_localize_script( 'rest-in-sync-sync', 'risSync', array(
 		<table class="wp-list-table widefat fixed striped" id="ris-sync-table" style="margin-top:20px;">
 			<thead>
 				<tr>
+					<th style="width:6%;"><?php esc_html_e( 'ID', 'rest-in-sync' ); ?></th>
 					<th><?php esc_html_e( 'Title', 'rest-in-sync' ); ?></th>
 					<th><?php esc_html_e( 'Post Type', 'rest-in-sync' ); ?></th>
 					<th class="ris-last-checked"><?php esc_html_e( 'Last Checked', 'rest-in-sync' ); ?></th>
@@ -101,6 +108,7 @@ wp_localize_script( 'rest-in-sync-sync', 'risSync', array(
 					) : '';
 				?>
 					<tr data-post-id="<?php echo esc_attr( $post->ID ); ?>">
+						<td><?php echo esc_html( $post->ID ); ?></td>
 						<td><?php echo esc_html( get_the_title( $post ) ); ?></td>
 						<td><?php echo esc_html( $post_type_object ? $post_type_object->labels->singular_name : $post->post_type ); ?></td>
 						<td class="ris-last-checked"><?php echo esc_html( $last_checked ? date_i18n( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), $last_checked ) : '—' ); ?></td>
@@ -119,6 +127,10 @@ wp_localize_script( 'rest-in-sync-sync', 'risSync', array(
 								<?php esc_html_e( 'Check Now', 'rest-in-sync' ); ?>
 							</button>
 							<span class="spinner ris-check-now-spinner" style="float:none;"></span>
+							<button type="button" class="button ris-ignore" data-post-id="<?php echo esc_attr( $post->ID ); ?>">
+								<?php esc_html_e( 'Ignore Until Next Sync', 'rest-in-sync' ); ?>
+							</button>
+							<span class="spinner ris-ignore-spinner" style="float:none;"></span>
 						</td>
 					</tr>
 				<?php endforeach; ?>

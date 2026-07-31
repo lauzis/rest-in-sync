@@ -31,17 +31,20 @@ class Rest_In_Sync_Admin_Menu {
 			return;
 		}
 
-		wp_enqueue_style(
-			'rest-in-sync-toast',
-			REST_IN_SYNC_URL . 'assets/css/toast.css',
-			array(),
-			REST_IN_SYNC_VERSION
-		);
+		// Toast styling and behaviour come from the shared lauzis/wp-notices
+		// package. The local script stays as a thin alias so the scripts that
+		// call RestInSyncToast.show() and depend on this handle are unchanged.
+		$toast_dependencies = array();
+
+		if ( class_exists( 'WpNotices_Registry' ) ) {
+			WpNotices_Registry::toasts( 'rest-in-sync' )->enqueue();
+			$toast_dependencies[] = \Lauzis\WpNotices\Toasts::HANDLE;
+		}
 
 		wp_enqueue_script(
 			'rest-in-sync-toast',
 			REST_IN_SYNC_URL . 'assets/js/toast.js',
-			array(),
+			$toast_dependencies,
 			REST_IN_SYNC_VERSION,
 			true
 		);

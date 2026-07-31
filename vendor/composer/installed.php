@@ -1,0 +1,41 @@
+<?php return array(
+    'root' => array(
+        'name' => 'lauzis/rest-in-sync',
+        'pretty_version' => 'dev-develop',
+        'version' => 'dev-develop',
+        'reference' => '23275f7e9d76c21dca8a231a8a0079b552ef4110',
+        'type' => 'wordpress-plugin',
+        'install_path' => __DIR__ . '/../../',
+        'aliases' => array(),
+        'dev' => false,
+    ),
+    'versions' => array(
+        'htmlburger/carbon-fields' => array(
+            'pretty_version' => 'v3.6.9',
+            'version' => '3.6.9.0',
+            'reference' => 'f82e80e3e3469d6e86cc17a8950b918ad448a059',
+            'type' => 'library',
+            'install_path' => __DIR__ . '/../htmlburger/carbon-fields',
+            'aliases' => array(),
+            'dev_requirement' => false,
+        ),
+        'lauzis/rest-in-sync' => array(
+            'pretty_version' => 'dev-develop',
+            'version' => 'dev-develop',
+            'reference' => '23275f7e9d76c21dca8a231a8a0079b552ef4110',
+            'type' => 'wordpress-plugin',
+            'install_path' => __DIR__ . '/../../',
+            'aliases' => array(),
+            'dev_requirement' => false,
+        ),
+        'lauzis/wp-logs' => array(
+            'pretty_version' => 'v1.0.0',
+            'version' => '1.0.0.0',
+            'reference' => '265726605d17a25479adc63f518f66e0f3b93bae',
+            'type' => 'library',
+            'install_path' => __DIR__ . '/../lauzis/wp-logs',
+            'aliases' => array(),
+            'dev_requirement' => false,
+        ),
+    ),
+);

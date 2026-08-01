@@ -29,112 +29,64 @@ class Rest_In_Sync_Settings {
 	}
 
 	public function register_fields() {
-		if ( ! class_exists( '\\Carbon_Fields\\Container' ) ) {
+		if ( ! class_exists( 'WpPackages_Registry' ) ) {
 			return;
 		}
 
-		\Carbon_Fields\Container::make( 'theme_options', __( 'Settings', 'rest-in-sync' ) )
-			->set_page_parent( Rest_In_Sync_Admin_Menu::MENU_SLUG )
-			->set_page_file( Rest_In_Sync_Admin_Menu::MENU_SLUG . '-settings' )
-			->set_page_menu_title( __( 'Settings', 'rest-in-sync' ) )
-			->add_fields( array(
-				\Carbon_Fields\Field\Field::make( 'checkbox', self::OPTION_IS_REMOTE_SERVER, __( 'This is the remote server', 'rest-in-sync' ) )
-					->set_help_text( __( 'Check this on the live/target site of a sync pair. It disables this site\'s own sync cron job and the manual sync actions below (Check Now, Resync Now, Push to Remote) — this site is only ever the destination, never the one initiating checks. The "/rest-in-sync/v1/meta/{id}" REST route (used by the other site to fetch full meta data) keeps working regardless, since that\'s what makes this useful as a remote target in the first place.', 'rest-in-sync' ) ),
+		$settings = WpPackages_Registry::settings(
+			'rest-in-sync',
+			array(
+				'title'           => __( 'Settings', 'rest-in-sync' ),
+				'mode'            => 'flat',
+				'page_parent'     => Rest_In_Sync_Admin_Menu::MENU_SLUG,
+				'page_file'       => Rest_In_Sync_Admin_Menu::MENU_SLUG . '-settings',
+				'page_menu_title' => __( 'Settings', 'rest-in-sync' ),
+			)
+		);
 
-				\Carbon_Fields\Field\Field::make( 'html', 'rest_in_sync_remote_server_notice' )
-					->set_html( '<p>' . esc_html__( 'The settings below only matter for a site that initiates its own sync checks, so they\'re hidden while "This is the remote server" is checked.', 'rest-in-sync' ) . '</p>' )
-					->set_conditional_logic( array(
-						array( 'field' => self::OPTION_IS_REMOTE_SERVER, 'value' => 'yes', 'compare' => '=' ),
-					) ),
+		$settings->callback( 'rest_in_sync_available_post_types', array( __CLASS__, 'get_available_post_types' ) );
+		$settings->callback( 'rest_in_sync_interval_options', array( 'Rest_In_Sync_Cron', 'get_interval_options' ) );
 
-				\Carbon_Fields\Field\Field::make( 'html', 'rest_in_sync_settings_intro' )
-					->set_html( '<p>' . esc_html__( 'Enter the connection details for the live WordPress site this plugin will sync to.', 'rest-in-sync' ) . '</p>' )
-					->set_conditional_logic( array(
-						array( 'field' => self::OPTION_IS_REMOTE_SERVER, 'value' => 'yes', 'compare' => '!=' ),
-					) ),
+		// Rendered lazily so the markup is produced when the page displays.
+		$settings->callback(
+			'rest_in_sync_test_connection_field',
+			static function () {
+				return '<button type="button" id="rest-in-sync-test-connection" class="button button-secondary">'
+					. esc_html__( 'Test Connection', 'rest-in-sync' )
+					. '</button>'
+					. '<span id="rest-in-sync-test-connection-spinner" class="spinner" style="float:none;"></span>'
+					. '<div id="rest-in-sync-test-connection-result" style="margin-top:10px;"></div>';
+			}
+		);
 
-				\Carbon_Fields\Field\Field::make( 'text', self::OPTION_SITE_URL, __( 'Site URL', 'rest-in-sync' ) )
-					->set_attribute( 'type', 'url' )
-					->set_attribute( 'placeholder', 'https://example.com' )
-					->set_help_text( __( 'The full URL of the live WordPress site, including https://.', 'rest-in-sync' ) )
-					->set_required( true )
-					->set_conditional_logic( array(
-						array( 'field' => self::OPTION_IS_REMOTE_SERVER, 'value' => 'yes', 'compare' => '!=' ),
-					) ),
+		$settings->register(
+			REST_IN_SYNC_DIR . 'config/settings.json',
+			array(
+				'prefix' => 'rest_in_sync_',
+				'domain' => 'rest-in-sync',
+			)
+		);
 
-				\Carbon_Fields\Field\Field::make( 'text', self::OPTION_USERNAME, __( 'Username', 'rest-in-sync' ) )
-					->set_help_text( __( 'The username of a user on the live site with permission to manage content.', 'rest-in-sync' ) )
-					->set_required( true )
-					->set_conditional_logic( array(
-						array( 'field' => self::OPTION_IS_REMOTE_SERVER, 'value' => 'yes', 'compare' => '!=' ),
-					) ),
+		// Logging comes from the shared package. This plugin's established key is
+		// rest_in_sync_enable_logging rather than the component's own name, so it
+		// is mapped rather than migrated. The condition hiding it on a remote
+		// server is a rest-in-sync concern the component knows nothing about, so it
+		// is supplied here too.
+		$settings->register(
+			WpPackages_Registry::schema( 'logs' ),
+			array(
+				'prefix'     => 'rest_in_sync_',
+				'domain'     => 'wp-plugin-packages',
+				'map'        => array( 'logs_enabled' => 'enable_logging' ),
+				'conditions' => array(
+					'logs_enabled' => array(
+						array( 'field' => 'is_remote_server', 'value' => 'yes', 'compare' => '!=' ),
+					),
+				),
+			)
+		);
 
-				\Carbon_Fields\Field\Field::make( 'text', self::OPTION_APP_PASSWORD, __( 'Application Password', 'rest-in-sync' ) )
-					->set_attribute( 'type', 'password' )
-					->set_help_text( __( 'Generate this under the live site\'s Users → Profile → Application Passwords.', 'rest-in-sync' ) )
-					->set_required( true )
-					->set_conditional_logic( array(
-						array( 'field' => self::OPTION_IS_REMOTE_SERVER, 'value' => 'yes', 'compare' => '!=' ),
-					) ),
-
-				\Carbon_Fields\Field\Field::make( 'html', 'rest_in_sync_test_connection' )
-					->set_html(
-						'<button type="button" id="rest-in-sync-test-connection" class="button button-secondary">'
-						. esc_html__( 'Test Connection', 'rest-in-sync' )
-						. '</button>'
-						. '<span id="rest-in-sync-test-connection-spinner" class="spinner" style="float:none;"></span>'
-						. '<div id="rest-in-sync-test-connection-result" style="margin-top:10px;"></div>'
-					)
-					->set_conditional_logic( array(
-						array( 'field' => self::OPTION_IS_REMOTE_SERVER, 'value' => 'yes', 'compare' => '!=' ),
-					) ),
-
-				\Carbon_Fields\Field\Field::make( 'checkbox', self::OPTION_ENABLE_LOGGING, __( 'Enable logging', 'rest-in-sync' ) )
-					->set_help_text( __( 'Write sync and connection test activity to daily log files, viewable on the Logs page.', 'rest-in-sync' ) )
-					->set_conditional_logic( array(
-						array( 'field' => self::OPTION_IS_REMOTE_SERVER, 'value' => 'yes', 'compare' => '!=' ),
-					) ),
-
-				\Carbon_Fields\Field\Field::make( 'set', self::OPTION_POST_TYPES, __( 'Post Types to Sync', 'rest-in-sync' ) )
-					->set_options( array( __CLASS__, 'get_available_post_types' ) )
-					->set_default_value( self::DEFAULT_POST_TYPES )
-					->set_help_text( __( 'Choose which post types should be checked and validated via the REST API.', 'rest-in-sync' ) )
-					->set_conditional_logic( array(
-						array( 'field' => self::OPTION_IS_REMOTE_SERVER, 'value' => 'yes', 'compare' => '!=' ),
-					) ),
-
-				\Carbon_Fields\Field\Field::make( 'html', 'rest_in_sync_cron_intro' )
-					->set_html( '<hr><p>' . esc_html__( 'The sync status cron job periodically compares local posts against the remote site and flags any that have drifted out of sync.', 'rest-in-sync' ) . '</p>' )
-					->set_conditional_logic( array(
-						array( 'field' => self::OPTION_IS_REMOTE_SERVER, 'value' => 'yes', 'compare' => '!=' ),
-					) ),
-
-				\Carbon_Fields\Field\Field::make( 'text', self::OPTION_CRON_BATCH_SIZE, __( 'Cron Batch Size', 'rest-in-sync' ) )
-					->set_attribute( 'type', 'number' )
-					->set_attribute( 'min', '1' )
-					->set_default_value( self::DEFAULT_CRON_BATCH_SIZE )
-					->set_help_text( __( 'How many posts to check for changes on each cron run.', 'rest-in-sync' ) )
-					->set_conditional_logic( array(
-						array( 'field' => self::OPTION_IS_REMOTE_SERVER, 'value' => 'yes', 'compare' => '!=' ),
-					) ),
-
-				\Carbon_Fields\Field\Field::make( 'select', self::OPTION_CRON_INTERVAL, __( 'Sync Check Interval', 'rest-in-sync' ) )
-					->set_options( array( 'Rest_In_Sync_Cron', 'get_interval_options' ) )
-					->set_default_value( self::DEFAULT_CRON_INTERVAL )
-					->set_help_text( __( 'How often the cron job runs to check posts for out-of-sync changes.', 'rest-in-sync' ) )
-					->set_conditional_logic( array(
-						array( 'field' => self::OPTION_IS_REMOTE_SERVER, 'value' => 'yes', 'compare' => '!=' ),
-					) ),
-
-				\Carbon_Fields\Field\Field::make( 'text', self::OPTION_RESYNC_THRESHOLD_HOURS, __( 'Resync Threshold (hours)', 'rest-in-sync' ) )
-					->set_attribute( 'type', 'number' )
-					->set_attribute( 'min', '1' )
-					->set_default_value( self::DEFAULT_RESYNC_THRESHOLD_HOURS )
-					->set_help_text( __( 'Posts checked more recently than this many hours ago are skipped until this many hours have passed. Posts that have never been checked are always processed.', 'rest-in-sync' ) )
-					->set_conditional_logic( array(
-						array( 'field' => self::OPTION_IS_REMOTE_SERVER, 'value' => 'yes', 'compare' => '!=' ),
-					) ),
-			) );
+		$settings->render();
 	}
 
 	public function enqueue_assets( $hook_suffix ) {

@@ -26,6 +26,9 @@ unset( $rest_in_sync_upload_dir );
 $rest_in_sync_autoload = REST_IN_SYNC_DIR . 'vendor/autoload.php';
 if ( file_exists( $rest_in_sync_autoload ) ) {
 	require_once $rest_in_sync_autoload;
+	// Required explicitly: Composer's files autoload runs only one copy of this
+	// package per request, so the version gate would never see the others.
+	require_once REST_IN_SYNC_DIR . 'vendor/lauzis/wp-plugin-packages/bootstrap.php';
 }
 unset( $rest_in_sync_autoload );
 

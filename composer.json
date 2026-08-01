@@ -6,18 +6,13 @@
     "repositories": [
         {
             "type": "vcs",
-            "url": "https://github.com/lauzis/wp-logs"
-        },
-        {
-            "type": "vcs",
-            "url": "https://github.com/lauzis/wp-notices"
+            "url": "https://github.com/lauzis/wp-plugin-packages"
         }
     ],
     "require": {
         "php": ">=7.4",
         "htmlburger/carbon-fields": "^3.6",
-        "lauzis/wp-logs": "^1.0",
-        "lauzis/wp-notices": "^1.0"
+        "lauzis/wp-plugin-packages": "^1.0"
     },
     "config": {
         "allow-plugins": {

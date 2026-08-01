@@ -31,14 +31,14 @@ class Rest_In_Sync_Admin_Menu {
 			return;
 		}
 
-		// Toast styling and behaviour come from the shared lauzis/wp-notices
+		// Toast styling and behaviour come from the shared lauzis/wp-plugin-packages
 		// package. The local script stays as a thin alias so the scripts that
 		// call RestInSyncToast.show() and depend on this handle are unchanged.
 		$toast_dependencies = array();
 
-		if ( class_exists( 'WpNotices_Registry' ) ) {
-			WpNotices_Registry::toasts( 'rest-in-sync' )->enqueue();
-			$toast_dependencies[] = \Lauzis\WpNotices\Toasts::HANDLE;
+		if ( class_exists( 'WpPackages_Registry' ) ) {
+			WpPackages_Registry::toasts( 'rest-in-sync' )->enqueue();
+			$toast_dependencies[] = \Lauzis\WpPackages\Notices\Toasts::HANDLE;
 		}
 
 		wp_enqueue_script(

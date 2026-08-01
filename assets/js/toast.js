@@ -1,5 +1,5 @@
 /**
- * Alias for the shared toast component in lauzis/wp-notices.
+ * Alias for the shared toast component in lauzis/wp-plugin-packages.
  *
  * The implementation moved to the package; this keeps window.RestInSyncToast
  * working so admin.js, sync.js, details.js and field-settings.js are unchanged.

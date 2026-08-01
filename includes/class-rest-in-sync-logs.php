@@ -6,7 +6,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Rest In Sync's logging entry point, gated by the "Enable logging" setting.
  *
- * The implementation lives in the shared lauzis/wp-logs package; this class is
+ * The implementation lives in the shared lauzis/wp-plugin-packages package; this class is
  * a thin facade that keeps the plugin's own API, so the call sites throughout
  * the plugin are unchanged.
  */
@@ -16,18 +16,18 @@ class Rest_In_Sync_Logs {
 	const SLUG = 'rest-in-sync';
 
 	/**
-	 * Returns the shared logger, or null when the wp-logs package is not
+	 * Returns the shared logger, or null when the wp-plugin-packages package is not
 	 * installed (e.g. a build shipped without vendor/). Logging then becomes a
 	 * silent no-op rather than a fatal.
 	 *
-	 * @return \Lauzis\WpLogs\Logger|null
+	 * @return \Lauzis\WpPackages\Logs\Logger|null
 	 */
 	private static function logger() {
-		if ( ! class_exists( 'WpLogs_Registry' ) ) {
+		if ( ! class_exists( 'WpPackages_Registry' ) ) {
 			return null;
 		}
 
-		return WpLogs_Registry::logger(
+		return WpPackages_Registry::logger(
 			self::SLUG,
 			array(
 				'dir'     => REST_IN_SYNC_LOG_PATH,

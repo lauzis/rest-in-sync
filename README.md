@@ -117,6 +117,93 @@ Which fields get compared, and what counts as a difference, can change between r
 
 Version-stale posts sort ahead of merely-old ones, so an upgrade re-checks everything rather than trickling through it. Posts never checked at all still go first. This is controlled by the **Re-check after a plugin update** setting, on by default: a stale check is worse than an extra one.
 
+## How a sync runs
+
+Three flows, all going through the same matching and rewriting. Nothing here writes to the remote except **Push**; the cron only observes.
+
+### The cron check
+
+```mermaid
+flowchart TD
+    A["wp-cron fires<br/>rest_in_sync_batch_sync"] --> B{"remote server,<br/>or not configured?"}
+    B -->|yes| Z["stop — this site<br/>is only a destination"]
+    B -->|no| C["get_batch()"]
+
+    C --> D["never-checked posts first<br/><i>slug-less excluded in SQL</i>"]
+    D --> E{"room left<br/>in the batch?"}
+    E -->|yes| F["then those due again:<br/>older than the threshold,<br/><b>or</b> checked by another version"]
+    E -->|no| G
+    F --> G["for each post"]
+
+    G --> H["ensure it has a UUID"]
+    H --> I["find its twin on the remote"]
+    I -->|no match| J["out of sync<br/><i>reason: no match</i>"]
+    I -->|match| K["fetch the remote post"]
+    K --> L["build_diff()"]
+    L -->|no differences| M["in sync"]
+    L -->|differences| N["out of sync<br/>+ diff written to uploads"]
+
+    J --> S["finish_check()"]
+    M --> S
+    N --> S
+    S --> T["stamp status, timestamp<br/>and the plugin version<br/>· clear the one-time snooze"]
+```
+
+### Finding the twin post
+
+Tried in order, stopping at the first hit. ID comes first because a slug alone can't be trusted — WPML can give several translations the same slug.
+
+```mermaid
+flowchart LR
+    A["remote id already<br/>stored in meta?"] -->|yes| Z["use it"]
+    A -->|no| B["same ID on<br/>the remote?"]
+    B -->|found| Y["remember it"]
+    B -->|no| C["by slug<br/><i>+ lang on WPML</i>"]
+    C -->|found| Y
+    C -->|no| D["scan for a matching<br/>GUID or UUID"]
+    D -->|found| Y
+    D -->|no| X["no match →<br/>flagged out of sync"]
+    Y --> W["write our UUID onto<br/>the remote post, so later<br/>lookups match even if<br/>the slug changes"]
+```
+
+### Pushing a post
+
+The only flow that changes the remote. Both sites check the version — the sender before sending, the receiver before accepting — so an older site that doesn't check still can't write into a newer one.
+
+```mermaid
+sequenceDiagram
+    participant U as You
+    participant L as This site
+    participant R as Remote site
+
+    U->>L: Push selected fields
+    L->>L: versions match?
+    Note over L: refused here if not — this<br/>guard also covers cron and AJAX
+    L->>L: find the twin post
+    L->>L: rewrite this site's home URL to<br/>the remote's, recursing into<br/>arrays (post_status exempt)
+
+    L->>R: POST wp/v2/{type}/{id}<br/>title, content, excerpt, status
+    Note right of R: core route — carries our version<br/>header, but core cannot check it
+    R-->>L: 200
+
+    opt any meta selected
+        L->>R: POST rest-in-sync/v1/meta/{id}<br/>X-Rest-In-Sync-Version
+        R->>R: sender's version == mine?
+        alt mismatch or missing
+            R-->>L: 409, naming both versions
+        else match
+            R-->>L: 200
+        end
+    end
+
+    L->>L: re-check this post
+    L-->>U: result — status and diff refreshed
+```
+
+The two guards cover different things. The **sender's** check stops the whole operation before either request goes out, so a site running 0.4.0 or later never reaches a mismatched remote at all. The **receiver's** check is what protects a site from a sender too old to have the first one — and it guards the meta route, the one accepting arbitrary keys. Standard fields go through WordPress core's own route, which this plugin cannot gate, so a pre-0.4.0 sender can still write a title or content into a newer remote. Meta, where a version difference actually changes how values are shaped, is the part that is refused.
+
+Pull is the mirror image: the same selected fields, written onto the local post with `wp_update_post()`/`update_post_meta()`, and the URL rewrite runs in the opposite direction so remote links don't leak into local content.
+
 ## Field settings
 
 Every comparable field/meta key (the same set the cron job compares) has two global toggles, stored once per field/meta name in the `rest_in_sync_field_settings` option and applied across all post types:

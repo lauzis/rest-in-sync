@@ -12,7 +12,7 @@ The plugin registers a top-level **REST in Sync** menu with the following pages:
 | Help | Explains how to set up the connection to a live site (including remote-side requirements), the cron sync check, and logging. |
 | Logs | Shows daily log files of sync and connection test activity, with a file selector and a "Clear all logs" button. |
 | Field Settings | Lists every field/meta key currently flagged "Don't sync by default" or "Don't use in diff" in one place, with the same toggle buttons as the Details page, plus wildcard pattern rules for excluding a whole family of meta keys at once. |
-| Settings | Carbon Fields powered form to configure the remote site connection, which post types to sync, with a "Test Connection" button and an "Enable logging" toggle. |
+| Settings | Configures the remote site connection, which post types to sync, the cron schedule, and logging, with a "Test Connection" button. The fields are declared in `config/settings.json` and rendered by Carbon Fields through the shared [wp-plugin-packages](https://github.com/lauzis/wp-plugin-packages) settings component. |
 
 ## Two-way installs and the "remote server" setting
 
@@ -66,6 +66,7 @@ Each checked post gets these meta fields:
 | `_rest_in_sync_status` | `never_synced`, `in_sync`, or `out_of_sync`. |
 | `_rest_in_sync_last_checked` | Unix timestamp of the last comparison. |
 | `_rest_in_sync_diff_id` | UUID of the diff JSON file, present only when out of sync. |
+| `_rest_in_sync_checked_version` | Plugin version that performed the check, so an upgrade can invalidate it. |
 
 When a post is out of sync, the differing fields are written as JSON to `wp-content/uploads/rest-in-sync-diffs/{uuid}.json`. The Sync page lists every out-of-sync post (ID, title, post type, last checked); a search box above the list filters it by title (via WP's standard `s` search, matched against `post_title`/`post_content`/`post_excerpt`). Each row's "Details" link opens that post's Sync Details page in a new tab, and its "Check Now" button re-runs `check_single()` for that post over AJAX — updating its row in place, or removing it from the list if it's now in sync — without waiting for the next cron run.
 
@@ -73,8 +74,48 @@ The Settings page configures:
 - **Cron Batch Size** — how many posts are checked per cron run (default 10).
 - **Sync Check Interval** — how often the cron runs, from every 5 minutes up to every 24 hours (default every 15 minutes).
 - **Resync Threshold (hours)** — how long to wait before re-checking a post that's already been checked; posts that have never been checked are always processed first (default 24 hours).
+- **Re-check after a plugin update** — treats every check made by an earlier version as out of date (default on). See "Version matching" above.
+
+Posts with no slug are excluded from selection in SQL rather than filtered out afterwards. A post with no slug can never be matched to a remote post by slug, and its GUID is only a local `?p=ID` placeholder that can't match a real remote GUID either — so it would only ever be reported as a false "out of sync" with no way to resolve it. Excluding them at selection time matters: filtering them out *after* the batch was chosen let them fill the batch, consume its whole budget, then get discarded, leaving nothing stamped — so the next run picked exactly the same posts and did nothing again, indefinitely.
 
 WP-Cron only fires on a page load, so on low-traffic sites checks can run later than scheduled. For reliable timing, set `define('DISABLE_WP_CRON', true);` in `wp-config.php` and trigger `wp-cron.php` from a real system cron job instead, e.g. `*/15 * * * * wget -q -O /dev/null "https://your-site.com/wp-cron.php?doing_wp_cron"`.
+
+## Version matching
+
+Pushes and pulls move field and meta values through this plugin's own REST route, so both sites have to agree on what that route accepts and returns. A remote running a different version may store fields differently, or not expose the route at all — pushing into that loses data quietly rather than failing loudly, which is the worst way for it to go wrong.
+
+So syncing is refused unless both ends report the same plugin version. Four situations are told apart, because they need different fixes:
+
+| Situation | What it means |
+| --- | --- |
+| Versions match | Syncing proceeds. |
+| Versions differ | Both versions are named, so you know which side to update. |
+| No version reported | The remote runs a version older than 0.4.0, or doesn't have the plugin active. |
+| The remote errored, or the connection isn't configured | The underlying reason is shown as-is. |
+
+The check runs **inside `push_to_remote()` and `pull_from_remote()`**, before any request leaves this site. That covers the AJAX handlers, the cron, and anything added later — not just the buttons. The Sync and Details pages additionally show the reason and disable the controls, so a blocked push is visible before the click rather than after it; that part is explanation, not enforcement.
+
+### Both ends check
+
+The sender's check only helps for a sender that *has* one — a site still on an older version pushes without asking. So the receiving site checks for itself too.
+
+Every write this plugin sends carries an `X-Rest-In-Sync-Version` header naming the sender, and `/wp-json/rest-in-sync/v1/meta/{id}` refuses a `POST` whose header is missing or doesn't match, with **HTTP 409** and a message naming both versions. Since that route accepts arbitrary meta, accepting a write from a version that may shape it differently is exactly how one site quietly corrupts the other.
+
+`GET` on the same route stays open regardless of version — comparing a mismatched pair is how you diagnose the mismatch in the first place, so reads must keep working when writes don't.
+
+### How the version is read
+
+Every REST response from a site running this plugin carries an `X-Rest-In-Sync-Version` header, and both remote helpers read it off responses they were already receiving. Ordinary sync traffic therefore keeps the reading current at no extra cost, and it reflects the exchange actually in progress rather than an earlier poll.
+
+There is also a dedicated `GET /wp-json/rest-in-sync/v1/version` route, used when nothing has been talked to recently — a freshly loaded Sync or Settings page — and as an explicit pre-flight probe. It returns `{"version": "...", "plugin": "rest-in-sync"}`.
+
+Both require an authenticated user (`edit_posts`), so a site's installed version is never advertised to anonymous visitors.
+
+### Re-checking after an upgrade
+
+Which fields get compared, and what counts as a difference, can change between releases — so a result recorded by an older version may no longer hold. Every completed check therefore records the version that made it in `_rest_in_sync_checked_version`, and a post whose recorded version differs from the running one is due again.
+
+Version-stale posts sort ahead of merely-old ones, so an upgrade re-checks everything rather than trickling through it. Posts never checked at all still go first. This is controlled by the **Re-check after a plugin update** setting, on by default: a stale check is worse than an extra one.
 
 ## Field settings
 
@@ -94,7 +135,7 @@ The "Details" link on the Sync page opens a per-post Sync Details page with a li
 - A **Sync** checkbox, checked by default unless the field is set to "Don't sync by default" — with **Select All** / **Select None** / **Select Default** controls above the table.
 - The two per-field toggle buttons described above.
 
-Since the standard REST API only ever exposes/accepts meta explicitly registered with `show_in_rest` — which excludes most ACF fields and other custom fields by default — this plugin also registers its own route, `/wp-json/rest-in-sync/v1/meta/{id}` (`includes/class-rest-in-sync-rest-controller.php`), gated by the same `edit_post` capability check as the rest of the authenticated connection. A `GET` returns *every* meta key on a post directly; a `POST` writes a `{"meta": {...}}` body the same way, refusing protected (underscore-prefixed) keys so it can't be used to overwrite internal bookkeeping. Without this, pushing or pulling an unregistered meta key would silently have no effect at all through the standard endpoint alone — WordPress just drops it. When the remote site is also running a plugin version with this route: reads are merged in and become real, comparable data counted toward the cron's out-of-sync status; pushes/pulls of any meta key actually take effect, not just the handful that happen to be REST-registered. If the remote doesn't have the route yet (an older version, or a plain WordPress install), reads degrade gracefully to the standard REST-exposed meta only, and pushes/pulls are limited to that same handful.
+Since the standard REST API only ever exposes/accepts meta explicitly registered with `show_in_rest` — which excludes most ACF fields and other custom fields by default — this plugin also registers its own route, `/wp-json/rest-in-sync/v1/meta/{id}` (`includes/class-rest-in-sync-rest-controller.php`), gated by the same `edit_post` capability check as the rest of the authenticated connection. A `GET` returns *every* meta key on a post directly; a `POST` writes a `{"meta": {...}}` body the same way, refusing protected (underscore-prefixed) keys so it can't be used to overwrite internal bookkeeping, and refusing writes from a mismatched plugin version (see "Version matching" above). Without this, pushing or pulling an unregistered meta key would silently have no effect at all through the standard endpoint alone — WordPress just drops it. When the remote site is also running a plugin version with this route: reads are merged in and become real, comparable data counted toward the cron's out-of-sync status; pushes/pulls of any meta key actually take effect, not just the handful that happen to be REST-registered. If the remote doesn't have the route yet (an older version, or a plain WordPress install), reads degrade gracefully to the standard REST-exposed meta only, and pushes/pulls are limited to that same handful.
 
 Any local meta key still not covered by either source is listed in the Details view anyway, marked "not exposed on remote" with no remote value shown, since there's no way to know what the remote actually holds for it. These are always included there (not hidden behind "Show fields with equal values") but never counted toward the cron's out-of-sync status — a site can easily have hundreds of such fields (e.g. per-day view-count trackers), and there's no remote value to genuinely compare against. A **Filter by field name** box above the table helps narrow down large field/meta lists.
 
@@ -118,24 +159,32 @@ This job only detects and records sync status — pushing content is a manual ac
 
 ## Logging
 
-When "Enable logging" is checked on the Settings page, connection tests, cron sync checks, and remote post lookups are written to daily log files under `wp-content/uploads/rest-in-sync-logs/`. Errors are always written to PHP's `error_log`, and additionally to these files when logging is enabled. Remote lookups log both the attempt (slug, GUID, UUID, and detected WPML language, if any) and, on a miss, how many remote entries were actually scanned — useful for telling apart a genuinely unmatched post from one hidden by a remote-side filter (e.g. WPML's default-language scoping). The Logs page lets you pick a day's log file, view its entries, or clear all log files, confirming deletion with a toast notification.
+Logging comes from the shared [wp-plugin-packages](https://github.com/lauzis/wp-plugin-packages) library; `Rest_In_Sync_Logs` is a thin facade over it, so this plugin's log files and settings behave the same as the other plugins'. When "Enable logging" is checked on the Settings page, connection tests, cron sync checks, and remote post lookups are written to daily log files under `wp-content/uploads/rest-in-sync-logs/`. Errors are always written to PHP's `error_log`, and additionally to these files when logging is enabled. Remote lookups log both the attempt (slug, GUID, UUID, and detected WPML language, if any) and, on a miss, how many remote entries were actually scanned — useful for telling apart a genuinely unmatched post from one hidden by a remote-side filter (e.g. WPML's default-language scoping). The Logs page lets you pick a day's log file, view its entries, or clear all log files, confirming deletion with a toast notification.
 
 ## Notifications
 
-Actions that need immediate feedback (Test Connection results, clearing logs) show a dismissible toast in the corner of the screen, in addition to the existing inline notices. The toast component (`assets/js/toast.js` and `assets/css/toast.css`) is loaded on every REST in Sync admin page and exposes `window.RestInSyncToast.show(message, type)`, where `type` is one of `success`, `error`, `warning`, or `info`.
+Actions that need immediate feedback (Test Connection results, clearing logs) show a dismissible toast in the corner of the screen, in addition to the existing inline notices. The toast component comes from the shared [wp-plugin-packages](https://github.com/lauzis/wp-plugin-packages) library, so it behaves identically across these plugins. `assets/js/toast.js` remains as a thin alias, so `window.RestInSyncToast.show(message, type)` still works, where `type` is one of `success`, `error`, `warning`, or `info`.
 
 ## Development
 
-Install PHP dependencies (Carbon Fields) with Composer:
+Install PHP dependencies (Carbon Fields and the shared component library) with Composer:
 
 ```
 composer install
+```
+
+Settings fields live in `config/settings.json` rather than in PHP. After changing them, regenerate the translation manifest so `wp i18n make-pot` can still see the strings:
+
+```
+vendor/lauzis/wp-plugin-packages/bin/schema-i18n \
+  --domain=rest-in-sync --out=languages/schema-strings.php config/settings.json
 ```
 
 ## Requirements
 
 - PHP 7.4+
 - WordPress with the REST API enabled
+- The same plugin version on both sites of a sync pair — writes between mismatched versions are refused by both ends
 
 ## License
 

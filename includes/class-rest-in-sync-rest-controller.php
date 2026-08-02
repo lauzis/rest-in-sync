@@ -108,6 +108,48 @@ class Rest_In_Sync_Rest_Controller {
 		return current_user_can( 'edit_posts' );
 	}
 
+	/**
+	 * Refuses a write whose sender is on a different plugin version.
+	 *
+	 * The sender checks too, but only a sender that HAS the check — a site on an
+	 * older version pushes without asking. Since this route accepts arbitrary
+	 * meta, accepting such a write is how one side quietly corrupts the other.
+	 * Deciding it here means the receiving site protects itself rather than
+	 * trusting whoever is calling.
+	 *
+	 * @return true|WP_Error
+	 */
+	private function check_sender_version( WP_REST_Request $request ) {
+		$sent = trim( (string) $request->get_header( self::VERSION_HEADER ) );
+
+		if ( '' === $sent ) {
+			return new WP_Error(
+				'rest_in_sync_sender_version_missing',
+				sprintf(
+					/* translators: %s: this site's plugin version */
+					__( 'The sending site did not identify its REST in Sync version. This site runs %s; update the sending site to match before syncing.', 'rest-in-sync' ),
+					REST_IN_SYNC_VERSION
+				),
+				array( 'status' => 409 )
+			);
+		}
+
+		if ( $sent !== REST_IN_SYNC_VERSION ) {
+			return new WP_Error(
+				'rest_in_sync_sender_version_mismatch',
+				sprintf(
+					/* translators: 1: sending site's version, 2: this site's version */
+					__( 'The sending site runs REST in Sync %1$s but this site runs %2$s. Update both to the same version before syncing.', 'rest-in-sync' ),
+					$sent,
+					REST_IN_SYNC_VERSION
+				),
+				array( 'status' => 409 )
+			);
+		}
+
+		return true;
+	}
+
 	public function check_permission( WP_REST_Request $request ) {
 		$post = get_post( (int) $request['post_id'] );
 
@@ -115,7 +157,17 @@ class Rest_In_Sync_Rest_Controller {
 			return new WP_Error( 'rest_in_sync_not_found', __( 'Post not found.', 'rest-in-sync' ), array( 'status' => 404 ) );
 		}
 
-		return current_user_can( 'edit_post', $post->ID );
+		if ( ! current_user_can( 'edit_post', $post->ID ) ) {
+			return false;
+		}
+
+		// Reads stay lenient: comparing a mismatched pair is exactly how you
+		// diagnose the mismatch. Only writes are refused.
+		if ( WP_REST_Server::READABLE !== $request->get_method() ) {
+			return $this->check_sender_version( $request );
+		}
+
+		return true;
 	}
 
 	/**

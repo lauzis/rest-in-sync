@@ -1184,6 +1184,9 @@ class Rest_In_Sync_Sync_Checker {
 			'headers' => array(
 				'Authorization' => 'Basic ' . base64_encode( $username . ':' . $app_password ),
 				'Content-Type'  => 'application/json',
+				// Lets the receiving site refuse a write from a version it does
+				// not match, rather than trusting the sender to have checked.
+				Rest_In_Sync_Rest_Controller::VERSION_HEADER => REST_IN_SYNC_VERSION,
 			),
 			'body'    => wp_json_encode( $body ),
 		) );

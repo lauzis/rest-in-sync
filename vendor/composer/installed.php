@@ -3,7 +3,7 @@
         'name' => 'lauzis/rest-in-sync',
         'pretty_version' => 'dev-develop',
         'version' => 'dev-develop',
-        'reference' => 'cbc4d17f15f74986507f0b5a69d1ca4f455ab8a9',
+        'reference' => 'fe598892e800a94dd0e21dfcb2a23b74af8faa55',
         'type' => 'wordpress-plugin',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -22,7 +22,7 @@
         'lauzis/rest-in-sync' => array(
             'pretty_version' => 'dev-develop',
             'version' => 'dev-develop',
-            'reference' => 'cbc4d17f15f74986507f0b5a69d1ca4f455ab8a9',
+            'reference' => 'fe598892e800a94dd0e21dfcb2a23b74af8faa55',
             'type' => 'wordpress-plugin',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),

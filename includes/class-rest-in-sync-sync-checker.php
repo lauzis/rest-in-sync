@@ -385,63 +385,74 @@ class Rest_In_Sync_Sync_Checker {
 	 * @return WP_Post[]
 	 */
 	private function get_batch( $post_types, $batch_size ) {
-		$never_checked = get_posts( array(
-			'post_type'      => $post_types,
-			'post_status'    => self::ELIGIBLE_POST_STATUSES,
-			'posts_per_page' => $batch_size,
-			'orderby'        => 'ID',
-			'order'          => 'ASC',
-			'fields'         => 'ids',
-			'meta_query'     => array(
-				array(
-					'key'     => self::META_LAST_CHECKED,
-					'compare' => 'NOT EXISTS',
-				),
-			),
-		) );
+		global $wpdb;
 
-		$post_ids  = $never_checked;
-		$remaining = $batch_size - count( $never_checked );
+		$types    = implode( ',', array_fill( 0, count( $post_types ), '%s' ) );
+		$statuses = implode( ',', array_fill( 0, count( self::ELIGIBLE_POST_STATUSES ), '%s' ) );
+
+		/*
+		 * Posts with no slug are excluded in SQL rather than filtered out in PHP
+		 * afterwards. A post with no slug can never be matched to a remote post by
+		 * slug, and its guid is just a local "?p=ID" placeholder that cannot match
+		 * a real remote guid either -- so it would only ever be reported as a false
+		 * "out of sync" with no way to resolve it.
+		 *
+		 * Filtering them after selection stalled the cron permanently: slug-less
+		 * posts have low IDs, so they filled the never-checked batch, consumed the
+		 * whole budget, were then all discarded, and nothing was ever stamped --
+		 * so the next run selected exactly the same posts and did nothing again.
+		 * Posts genuinely due for a re-check were never reached.
+		 */
+		$never_checked = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT p.ID FROM {$wpdb->posts} p
+				 WHERE p.post_type IN ($types)
+				   AND p.post_status IN ($statuses)
+				   AND p.post_name != ''
+				   AND NOT EXISTS (
+				       SELECT 1 FROM {$wpdb->postmeta} m
+				       WHERE m.post_id = p.ID AND m.meta_key = %s
+				   )
+				 ORDER BY p.ID ASC
+				 LIMIT %d",
+				...array_merge(
+					$post_types,
+					self::ELIGIBLE_POST_STATUSES,
+					array( self::META_LAST_CHECKED, $batch_size )
+				)
+			)
+		);
+
+		$post_ids  = array_map( 'intval', $never_checked );
+		$remaining = $batch_size - count( $post_ids );
 
 		if ( $remaining > 0 ) {
 			$threshold_cutoff = time() - ( Rest_In_Sync_Settings::get_resync_threshold_hours() * HOUR_IN_SECONDS );
 
-			$due_for_resync = get_posts( array(
-				'post_type'      => $post_types,
-				'post_status'    => self::ELIGIBLE_POST_STATUSES,
-				'posts_per_page' => $remaining,
-				'orderby'        => 'meta_value_num',
-				'order'          => 'ASC',
-				'fields'         => 'ids',
-				'meta_key'       => self::META_LAST_CHECKED,
-				'meta_query'     => array(
-					array(
-						'key'     => self::META_LAST_CHECKED,
-						'value'   => $threshold_cutoff,
-						'compare' => '<=',
-						'type'    => 'NUMERIC',
-					),
-				),
-			) );
+			$due_for_resync = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT p.ID FROM {$wpdb->posts} p
+					 INNER JOIN {$wpdb->postmeta} m
+					     ON m.post_id = p.ID AND m.meta_key = %s
+					 WHERE p.post_type IN ($types)
+					   AND p.post_status IN ($statuses)
+					   AND p.post_name != ''
+					   AND CAST( m.meta_value AS UNSIGNED ) <= %d
+					 ORDER BY CAST( m.meta_value AS UNSIGNED ) ASC
+					 LIMIT %d",
+					...array_merge(
+						array( self::META_LAST_CHECKED ),
+						$post_types,
+						self::ELIGIBLE_POST_STATUSES,
+						array( $threshold_cutoff, $remaining )
+					)
+				)
+			);
 
-			$post_ids = array_merge( $post_ids, $due_for_resync );
+			$post_ids = array_merge( $post_ids, array_map( 'intval', $due_for_resync ) );
 		}
 
-		/*
-		 * A post with no slug (typically a draft that's never been published)
-		 * can never be matched to a remote post by slug, and its guid is just a
-		 * local "?p=ID" placeholder that can't match a real remote guid either —
-		 * so it would only ever be reported as a false "out of sync" with no way
-		 * to resolve it, especially where several drafts share the same title.
-		 * Filtered here in PHP, not via a 'posts_where' hook, since get_posts()
-		 * suppresses query filters by default.
-		 */
-		return array_filter(
-			array_map( 'get_post', $post_ids ),
-			static function ( $post ) {
-				return '' !== $post->post_name;
-			}
-		);
+		return array_values( array_filter( array_map( 'get_post', $post_ids ) ) );
 	}
 
 	private function check_post( WP_Post $post ) {

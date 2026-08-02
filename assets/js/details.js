@@ -194,6 +194,14 @@
 			} );
 		}
 
+		// A version mismatch means the two sites may not store or accept fields
+		// the same way, so every sync control is disabled. The server refuses too.
+		if ( risDetails.versionBlocked ) {
+			$( '#ris-push, #ris-pull, .ris-push-field, .ris-pull-field' )
+				.prop( 'disabled', true )
+				.attr( 'title', risDetails.versionMessage );
+		}
+
 		$( '#ris-push' ).on( 'click', function () {
 			syncFields( {
 				buttonSelector: '#ris-push',

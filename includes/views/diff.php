@@ -34,7 +34,13 @@ if ( $nonce_valid ) {
 }
 
 if ( $post ) {
+	$rest_in_sync_versions = Rest_In_Sync_Version::check();
+
 	wp_localize_script( 'rest-in-sync-details', 'risDetails', array(
+		// Pushing and pulling are refused server-side on a mismatch; this only
+		// lets the page say so before the click.
+		'versionBlocked' => is_wp_error( $rest_in_sync_versions ),
+		'versionMessage' => is_wp_error( $rest_in_sync_versions ) ? $rest_in_sync_versions->get_error_message() : '',
 		'ajaxUrl'      => admin_url( 'admin-ajax.php' ),
 		'nonce'        => wp_create_nonce( Rest_In_Sync_Ajax::NONCE_ACTION_DETAILS ),
 		'resyncNonce'  => wp_create_nonce( Rest_In_Sync_Ajax::NONCE_ACTION_SYNC ),
@@ -82,6 +88,10 @@ if ( $post ) {
 			<p><?php echo esc_html( $error ); ?></p>
 		</div>
 	<?php else : ?>
+		<?php
+		$rest_in_sync_version_state = $rest_in_sync_versions;
+		require REST_IN_SYNC_DIR . 'includes/views/version-notice.php';
+		?>
 		<p>
 			<strong><?php esc_html_e( 'Post:', 'rest-in-sync' ); ?></strong>
 			<?php echo esc_html( get_the_title( $post ) ); ?>

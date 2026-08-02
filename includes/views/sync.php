@@ -46,6 +46,10 @@ wp_localize_script( 'rest-in-sync-sync', 'risSync', array(
 ) );
 ?>
 <div class="wrap">
+	<?php
+	$rest_in_sync_version_state = Rest_In_Sync_Version::check();
+	require REST_IN_SYNC_DIR . 'includes/views/version-notice.php';
+	?>
 	<h1 class="wp-heading-inline"><?php esc_html_e( 'Sync', 'rest-in-sync' ); ?></h1>
 	<hr class="wp-header-end">
 

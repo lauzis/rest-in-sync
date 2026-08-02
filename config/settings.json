@@ -171,6 +171,20 @@
           "compare": "!="
         }
       ]
+    },
+    {
+      "id": "recheck_on_version_change",
+      "type": "checkbox",
+      "title": "Re-check after a plugin update",
+      "default_value": true,
+      "help_text": "When the plugin is updated, treat every previous sync check as out of date and check the posts again. Which fields are compared, and what counts as a difference, can change between versions, so results from an older one may no longer hold.",
+      "conditional_logic": [
+        {
+          "field": "is_remote_server",
+          "value": "yes",
+          "compare": "!="
+        }
+      ]
     }
   ]
 }

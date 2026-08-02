@@ -15,6 +15,7 @@ class Rest_In_Sync_Sync_Checker {
 	const META_LAST_CHECKED = '_rest_in_sync_last_checked';
 	const META_DIFF_ID      = '_rest_in_sync_diff_id';
 	const META_IGNORED      = '_rest_in_sync_ignored';
+	const META_CHECKED_VERSION = '_rest_in_sync_checked_version';
 
 	const STATUS_NEVER_SYNCED = 'never_synced';
 	const STATUS_IN_SYNC      = 'in_sync';
@@ -124,6 +125,18 @@ class Rest_In_Sync_Sync_Checker {
 	 * @return true|WP_Error
 	 */
 	public function push_to_remote( WP_Post $post, array $selected_keys ) {
+		// Both ends move meta through this plugin's own REST route, so a version
+		// mismatch means the other end may store or accept fields differently.
+		// Refusing here covers the AJAX handler, the cron and any future caller,
+		// not just the button.
+		$versions = Rest_In_Sync_Version::check();
+
+		if ( is_wp_error( $versions ) ) {
+			Rest_In_Sync_Logs::add_error( 'push', $versions->get_error_message(), array( 'post_id' => $post->ID ) );
+
+			return $versions;
+		}
+
 		if ( Rest_In_Sync_Settings::is_remote_server() ) {
 			return $this->remote_server_error();
 		}
@@ -199,6 +212,18 @@ class Rest_In_Sync_Sync_Checker {
 	 * @return true|WP_Error
 	 */
 	public function pull_from_remote( WP_Post $post, array $selected_keys ) {
+		// Both ends move meta through this plugin's own REST route, so a version
+		// mismatch means the other end may store or accept fields differently.
+		// Refusing here covers the AJAX handler, the cron and any future caller,
+		// not just the button.
+		$versions = Rest_In_Sync_Version::check();
+
+		if ( is_wp_error( $versions ) ) {
+			Rest_In_Sync_Logs::add_error( 'pull', $versions->get_error_message(), array( 'post_id' => $post->ID ) );
+
+			return $versions;
+		}
+
 		if ( Rest_In_Sync_Settings::is_remote_server() ) {
 			return $this->remote_server_error();
 		}
@@ -429,22 +454,45 @@ class Rest_In_Sync_Sync_Checker {
 		if ( $remaining > 0 ) {
 			$threshold_cutoff = time() - ( Rest_In_Sync_Settings::get_resync_threshold_hours() * HOUR_IN_SECONDS );
 
+			/*
+			 * A post is due either because its check has aged past the
+			 * threshold, or because it was checked by a different plugin
+			 * version — an upgrade can change which fields are compared and
+			 * what counts as a difference, so those results are no longer
+			 * trustworthy. Version-stale posts sort first, since a fresh
+			 * upgrade should re-check everything rather than trickle.
+			 */
+			$recheck_on_upgrade = Rest_In_Sync_Settings::recheck_on_version_change();
+
 			$due_for_resync = $wpdb->get_col(
 				$wpdb->prepare(
 					"SELECT p.ID FROM {$wpdb->posts} p
 					 INNER JOIN {$wpdb->postmeta} m
 					     ON m.post_id = p.ID AND m.meta_key = %s
+					 LEFT JOIN {$wpdb->postmeta} v
+					     ON v.post_id = p.ID AND v.meta_key = %s
 					 WHERE p.post_type IN ($types)
 					   AND p.post_status IN ($statuses)
 					   AND p.post_name != ''
-					   AND CAST( m.meta_value AS UNSIGNED ) <= %d
-					 ORDER BY CAST( m.meta_value AS UNSIGNED ) ASC
+					   AND (
+					       CAST( m.meta_value AS UNSIGNED ) <= %d
+					       OR ( %d = 1 AND ( v.meta_value IS NULL OR v.meta_value != %s ) )
+					   )
+					 ORDER BY
+					   CASE WHEN v.meta_value IS NULL OR v.meta_value != %s THEN 0 ELSE 1 END ASC,
+					   CAST( m.meta_value AS UNSIGNED ) ASC
 					 LIMIT %d",
 					...array_merge(
-						array( self::META_LAST_CHECKED ),
+						array( self::META_LAST_CHECKED, self::META_CHECKED_VERSION ),
 						$post_types,
 						self::ELIGIBLE_POST_STATUSES,
-						array( $threshold_cutoff, $remaining )
+						array(
+							$threshold_cutoff,
+							$recheck_on_upgrade ? 1 : 0,
+							REST_IN_SYNC_VERSION,
+							REST_IN_SYNC_VERSION,
+							$remaining,
+						)
 					)
 				)
 			);
@@ -497,6 +545,11 @@ class Rest_In_Sync_Sync_Checker {
 	private function finish_check( WP_Post $post, $status, array $diff = array() ) {
 		update_post_meta( $post->ID, self::META_STATUS, $status );
 		update_post_meta( $post->ID, self::META_LAST_CHECKED, time() );
+
+		// Recorded so an upgrade can invalidate the result: what counts as a
+		// difference, and which fields are compared, can change between
+		// versions, so a check made by an older one may no longer be true.
+		update_post_meta( $post->ID, self::META_CHECKED_VERSION, REST_IN_SYNC_VERSION );
 
 		// "Ignore until next sync" is a one-time snooze: every completed check
 		// consumes it, regardless of outcome, so a post that's still out of

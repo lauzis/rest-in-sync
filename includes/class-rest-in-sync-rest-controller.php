@@ -19,12 +19,28 @@ class Rest_In_Sync_Rest_Controller {
 
 	const NAMESPACE_NAME = 'rest-in-sync/v1';
 	const ROUTE          = '/meta/(?P<post_id>\d+)';
+	const ROUTE_VERSION  = '/version';
 
 	public function __construct() {
 		add_action( 'rest_api_init', array( $this, 'register_routes' ) );
 	}
 
 	public function register_routes() {
+		/*
+		 * Lets the other end of a sync pair discover which version it is talking
+		 * to. Both sites move meta through the route below, so they have to
+		 * agree on what it accepts and returns; a mismatch is what blocks a push.
+		 * Requires an authenticated user, so this does not advertise the
+		 * installed version to anonymous visitors.
+		 */
+		register_rest_route( self::NAMESPACE_NAME, self::ROUTE_VERSION, array(
+			array(
+				'methods'             => WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'get_version' ),
+				'permission_callback' => array( $this, 'check_version_permission' ),
+			),
+		) );
+
 		register_rest_route( self::NAMESPACE_NAME, self::ROUTE, array(
 			array(
 				'methods'             => WP_REST_Server::READABLE,
@@ -44,6 +60,31 @@ class Rest_In_Sync_Rest_Controller {
 	 * authenticate (e.g. via Application Passwords) as a user allowed to edit
 	 * this specific post.
 	 */
+	/**
+	 * Reports this site's plugin version.
+	 *
+	 * @return WP_REST_Response
+	 */
+	public function get_version() {
+		return new WP_REST_Response(
+			array(
+				'version' => REST_IN_SYNC_VERSION,
+				'plugin'  => 'rest-in-sync',
+			),
+			200
+		);
+	}
+
+	/**
+	 * Any authenticated user who can edit content may ask for the version — the
+	 * same people who can use the sync features that depend on it.
+	 *
+	 * @return bool
+	 */
+	public function check_version_permission() {
+		return current_user_can( 'edit_posts' );
+	}
+
 	public function check_permission( WP_REST_Request $request ) {
 		$post = get_post( (int) $request['post_id'] );
 

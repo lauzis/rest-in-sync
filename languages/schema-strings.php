@@ -25,6 +25,7 @@ __( 'How many posts to check for changes on each cron run.', 'rest-in-sync' );
 __( 'How often the cron job runs to check posts for out-of-sync changes.', 'rest-in-sync' );
 __( 'Post Types to Sync', 'rest-in-sync' );
 __( 'Posts checked more recently than this many hours ago are skipped until this many hours have passed. Posts that have never been checked are always processed.', 'rest-in-sync' );
+__( 'Re-check after a plugin update', 'rest-in-sync' );
 __( 'Resync Threshold (hours)', 'rest-in-sync' );
 __( 'Site URL', 'rest-in-sync' );
 __( 'Sync Check Interval', 'rest-in-sync' );
@@ -32,3 +33,4 @@ __( 'The full URL of the live WordPress site, including https://.', 'rest-in-syn
 __( 'The username of a user on the live site with permission to manage content.', 'rest-in-sync' );
 __( 'This is the remote server', 'rest-in-sync' );
 __( 'Username', 'rest-in-sync' );
+__( 'When the plugin is updated, treat every previous sync check as out of date and check the posts again. Which fields are compared, and what counts as a difference, can change between versions, so results from an older one may no longer hold.', 'rest-in-sync' );

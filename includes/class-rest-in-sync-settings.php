@@ -17,6 +17,7 @@ class Rest_In_Sync_Settings {
 	const OPTION_CRON_BATCH_SIZE       = 'rest_in_sync_cron_batch_size';
 	const OPTION_CRON_INTERVAL         = 'rest_in_sync_cron_interval';
 	const OPTION_RESYNC_THRESHOLD_HOURS = 'rest_in_sync_resync_threshold_hours';
+	const OPTION_RECHECK_ON_VERSION_CHANGE = 'rest_in_sync_recheck_on_version_change';
 
 	const DEFAULT_POST_TYPES               = array( 'post', 'page' );
 	const DEFAULT_CRON_BATCH_SIZE          = 10;
@@ -134,6 +135,18 @@ class Rest_In_Sync_Settings {
 		return '' !== trim( (string) self::get_site_url() )
 			&& '' !== trim( (string) self::get_username() )
 			&& '' !== trim( (string) self::get_app_password() );
+	}
+
+	/**
+	 * Whether a plugin update should invalidate previous sync checks.
+	 *
+	 * @return bool
+	 */
+	public static function recheck_on_version_change() {
+		// Carbon Fields applies the field's own default (on) when nothing is
+		// stored, so an install that has never opened Settings still re-checks
+		// after an upgrade — a stale check is worse than an extra one.
+		return (bool) self::get_option( self::OPTION_RECHECK_ON_VERSION_CHANGE );
 	}
 
 	public static function logging_enabled() {

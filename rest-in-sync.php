@@ -3,7 +3,7 @@
  * Plugin Name: REST in Sync
  * Plugin URI: https://github.com/lauzis/rest-in-sync
  * Description: A lightweight tool to smoothly sync posts from local environments to live servers via the REST API.
- * Version: 0.2.0
+ * Version: 0.3.0
  * Author: Aivars Lauzis
  * License: MIT
  * Text Domain: rest-in-sync
@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'REST_IN_SYNC_VERSION', '0.2.0' );
+define( 'REST_IN_SYNC_VERSION', '0.3.0' );
 define( 'REST_IN_SYNC_FILE', __FILE__ );
 define( 'REST_IN_SYNC_DIR', plugin_dir_path( __FILE__ ) );
 define( 'REST_IN_SYNC_URL', plugin_dir_url( __FILE__ ) );

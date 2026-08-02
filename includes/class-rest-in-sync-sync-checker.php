@@ -1152,6 +1152,10 @@ class Rest_In_Sync_Sync_Checker {
 			),
 		) );
 
+		// The remote stamps its plugin version on every response, so ordinary
+		// sync traffic keeps the version cache current at no extra cost.
+		Rest_In_Sync_Version::observe( $response );
+
 		if ( is_wp_error( $response ) ) {
 			return $response;
 		}
@@ -1183,6 +1187,8 @@ class Rest_In_Sync_Sync_Checker {
 			),
 			'body'    => wp_json_encode( $body ),
 		) );
+
+		Rest_In_Sync_Version::observe( $response );
 
 		if ( is_wp_error( $response ) ) {
 			return $response;

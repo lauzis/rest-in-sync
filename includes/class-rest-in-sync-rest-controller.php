@@ -21,8 +21,31 @@ class Rest_In_Sync_Rest_Controller {
 	const ROUTE          = '/meta/(?P<post_id>\d+)';
 	const ROUTE_VERSION  = '/version';
 
+	/** Header carrying this site's plugin version on REST responses. */
+	const VERSION_HEADER = 'X-Rest-In-Sync-Version';
+
 	public function __construct() {
 		add_action( 'rest_api_init', array( $this, 'register_routes' ) );
+		add_filter( 'rest_post_dispatch', array( $this, 'add_version_header' ), 10, 1 );
+	}
+
+	/**
+	 * Stamps the plugin version on every REST response.
+	 *
+	 * The other end of a sync pair already makes plenty of authenticated
+	 * requests here, so it can read the version off any of them instead of
+	 * asking a dedicated route each time. Only added for logged-in requests, so
+	 * this does not advertise the installed version to anonymous visitors.
+	 *
+	 * @param WP_HTTP_Response $response
+	 * @return WP_HTTP_Response
+	 */
+	public function add_version_header( $response ) {
+		if ( $response instanceof WP_HTTP_Response && is_user_logged_in() ) {
+			$response->header( self::VERSION_HEADER, REST_IN_SYNC_VERSION );
+		}
+
+		return $response;
 	}
 
 	public function register_routes() {

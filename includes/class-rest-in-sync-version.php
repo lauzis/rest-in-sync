@@ -28,6 +28,28 @@ class Rest_In_Sync_Version {
 	}
 
 	/**
+	 * Records the version seen on a response from the remote.
+	 *
+	 * Every sync request already comes back with the header, so the cache is
+	 * kept warm by ordinary traffic and the dedicated route below is only
+	 * needed when nothing has been talked to recently — a freshly loaded
+	 * settings page, say.
+	 *
+	 * @param array|WP_Error $response A wp_remote_* response.
+	 */
+	public static function observe( $response ) {
+		if ( is_wp_error( $response ) ) {
+			return;
+		}
+
+		$version = wp_remote_retrieve_header( $response, strtolower( Rest_In_Sync_Rest_Controller::VERSION_HEADER ) );
+
+		if ( is_string( $version ) && '' !== $version ) {
+			set_transient( self::TRANSIENT, $version, self::CACHE_TTL );
+		}
+	}
+
+	/**
 	 * The remote site's plugin version, or a WP_Error explaining why it could
 	 * not be determined.
 	 *

@@ -1,0 +1,4 @@
+# vendor/ is committed so a downloaded copy of the plugin runs as-is, without
+# a composer install step. Keep it built with --no-dev.
+node_modules/
+.DS_Store

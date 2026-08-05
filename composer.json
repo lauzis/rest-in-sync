@@ -1,0 +1,22 @@
+{
+    "name": "lauzis/rest-in-sync",
+    "description": "A lightweight tool to smoothly sync posts from local environments to live servers via the REST API.",
+    "type": "wordpress-plugin",
+    "license": "MIT",
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/lauzis/wp-plugin-packages"
+        }
+    ],
+    "require": {
+        "php": ">=7.4",
+        "htmlburger/carbon-fields": "^3.6",
+        "lauzis/wp-plugin-packages": "^1.0"
+    },
+    "config": {
+        "allow-plugins": {
+            "composer/installers": true
+        }
+    }
+}

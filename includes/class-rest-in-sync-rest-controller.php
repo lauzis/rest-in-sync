@@ -1,0 +1,229 @@
+<?php
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
+/**
+ * Registers a small REST route for reading and writing every meta key on a
+ * post, bypassing register_meta()/show_in_rest entirely. The standard WP
+ * REST API only ever exposes/accepts meta explicitly registered for REST,
+ * which excludes most ACF fields and other custom fields by default — a GET
+ * here returns everything, and a POST/PUT here writes everything, neither
+ * silently dropping unregistered keys the way the standard 'meta' object
+ * does. This route lets the sync checker compare, detect real drift in, and
+ * push/pull meta the standard 'meta' field would never see or accept — as
+ * long as the site on the other end is also running this plugin version,
+ * since it's the one serving this route.
+ */
+class Rest_In_Sync_Rest_Controller {
+
+	const NAMESPACE_NAME = 'rest-in-sync/v1';
+	const ROUTE          = '/meta/(?P<post_id>\d+)';
+	const ROUTE_VERSION  = '/version';
+
+	/** Header carrying this site's plugin version on REST responses. */
+	const VERSION_HEADER = 'X-Rest-In-Sync-Version';
+
+	public function __construct() {
+		add_action( 'rest_api_init', array( $this, 'register_routes' ) );
+		add_filter( 'rest_post_dispatch', array( $this, 'add_version_header' ), 10, 1 );
+	}
+
+	/**
+	 * Stamps the plugin version on every REST response.
+	 *
+	 * The other end of a sync pair already makes plenty of authenticated
+	 * requests here, so it can read the version off any of them instead of
+	 * asking a dedicated route each time. Only added for logged-in requests, so
+	 * this does not advertise the installed version to anonymous visitors.
+	 *
+	 * @param WP_HTTP_Response $response
+	 * @return WP_HTTP_Response
+	 */
+	public function add_version_header( $response ) {
+		if ( $response instanceof WP_HTTP_Response && is_user_logged_in() ) {
+			$response->header( self::VERSION_HEADER, REST_IN_SYNC_VERSION );
+		}
+
+		return $response;
+	}
+
+	public function register_routes() {
+		/*
+		 * Lets the other end of a sync pair discover which version it is talking
+		 * to. Both sites move meta through the route below, so they have to
+		 * agree on what it accepts and returns; a mismatch is what blocks a push.
+		 * Requires an authenticated user, so this does not advertise the
+		 * installed version to anonymous visitors.
+		 */
+		register_rest_route( self::NAMESPACE_NAME, self::ROUTE_VERSION, array(
+			array(
+				'methods'             => WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'get_version' ),
+				'permission_callback' => array( $this, 'check_version_permission' ),
+			),
+		) );
+
+		register_rest_route( self::NAMESPACE_NAME, self::ROUTE, array(
+			array(
+				'methods'             => WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'get_all_meta' ),
+				'permission_callback' => array( $this, 'check_permission' ),
+			),
+			array(
+				'methods'             => WP_REST_Server::EDITABLE,
+				'callback'            => array( $this, 'update_meta' ),
+				'permission_callback' => array( $this, 'check_permission' ),
+			),
+		) );
+	}
+
+	/**
+	 * Same trust boundary as the rest of the sync connection: the request must
+	 * authenticate (e.g. via Application Passwords) as a user allowed to edit
+	 * this specific post.
+	 */
+	/**
+	 * Reports this site's plugin version.
+	 *
+	 * @return WP_REST_Response
+	 */
+	public function get_version() {
+		return new WP_REST_Response(
+			array(
+				'version' => REST_IN_SYNC_VERSION,
+				'plugin'  => 'rest-in-sync',
+			),
+			200
+		);
+	}
+
+	/**
+	 * Any authenticated user who can edit content may ask for the version — the
+	 * same people who can use the sync features that depend on it.
+	 *
+	 * @return bool
+	 */
+	public function check_version_permission() {
+		return current_user_can( 'edit_posts' );
+	}
+
+	/**
+	 * Refuses a write whose sender is on a different plugin version.
+	 *
+	 * The sender checks too, but only a sender that HAS the check — a site on an
+	 * older version pushes without asking. Since this route accepts arbitrary
+	 * meta, accepting such a write is how one side quietly corrupts the other.
+	 * Deciding it here means the receiving site protects itself rather than
+	 * trusting whoever is calling.
+	 *
+	 * @return true|WP_Error
+	 */
+	private function check_sender_version( WP_REST_Request $request ) {
+		$sent = trim( (string) $request->get_header( self::VERSION_HEADER ) );
+
+		if ( '' === $sent ) {
+			return new WP_Error(
+				'rest_in_sync_sender_version_missing',
+				sprintf(
+					/* translators: %s: this site's plugin version */
+					__( 'The sending site did not identify its REST in Sync version. This site runs %s; update the sending site to match before syncing.', 'rest-in-sync' ),
+					REST_IN_SYNC_VERSION
+				),
+				array( 'status' => 409 )
+			);
+		}
+
+		if ( $sent !== REST_IN_SYNC_VERSION ) {
+			return new WP_Error(
+				'rest_in_sync_sender_version_mismatch',
+				sprintf(
+					/* translators: 1: sending site's version, 2: this site's version */
+					__( 'The sending site runs REST in Sync %1$s but this site runs %2$s. Update both to the same version before syncing.', 'rest-in-sync' ),
+					$sent,
+					REST_IN_SYNC_VERSION
+				),
+				array( 'status' => 409 )
+			);
+		}
+
+		return true;
+	}
+
+	public function check_permission( WP_REST_Request $request ) {
+		$post = get_post( (int) $request['post_id'] );
+
+		if ( ! $post ) {
+			return new WP_Error( 'rest_in_sync_not_found', __( 'Post not found.', 'rest-in-sync' ), array( 'status' => 404 ) );
+		}
+
+		if ( ! current_user_can( 'edit_post', $post->ID ) ) {
+			return false;
+		}
+
+		// Reads stay lenient: comparing a mismatched pair is exactly how you
+		// diagnose the mismatch. Only writes are refused.
+		if ( WP_REST_Server::READABLE !== $request->get_method() ) {
+			return $this->check_sender_version( $request );
+		}
+
+		return true;
+	}
+
+	/**
+	 * @return WP_REST_Response meta_key => value (single value, like get_post_meta($id, $key, true)),
+	 *                           excluding protected (underscore-prefixed) meta — internal bookkeeping
+	 *                           (edit locks, ACF's field-key shadow entries, this plugin's own meta,
+	 *                           etc.) rather than content anyone would want to compare or sync.
+	 */
+	public function get_all_meta( WP_REST_Request $request ) {
+		$post_id = (int) $request['post_id'];
+
+		global $wpdb;
+
+		$meta_keys = $wpdb->get_col( $wpdb->prepare(
+			"SELECT DISTINCT meta_key FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key NOT LIKE %s",
+			$post_id,
+			$wpdb->esc_like( '_' ) . '%'
+		) );
+
+		$meta = array();
+
+		foreach ( $meta_keys as $meta_key ) {
+			$meta[ $meta_key ] = get_post_meta( $post_id, $meta_key, true );
+		}
+
+		return rest_ensure_response( $meta );
+	}
+
+	/**
+	 * Writes arbitrary meta directly via update_post_meta(), given a
+	 * {"meta": {"key": "value", ...}} request body. Protected (underscore-
+	 * prefixed) keys are refused — the same boundary get_all_meta() applies —
+	 * so this can't be used to overwrite internal bookkeeping, including this
+	 * plugin's own linking meta.
+	 *
+	 * @return WP_REST_Response {"updated": ["key", ...]}
+	 */
+	public function update_meta( WP_REST_Request $request ) {
+		$post_id = (int) $request['post_id'];
+		$meta    = $request->get_param( 'meta' );
+
+		if ( ! is_array( $meta ) ) {
+			return new WP_Error( 'rest_in_sync_invalid_meta', __( 'The "meta" parameter must be an object of meta_key => value.', 'rest-in-sync' ), array( 'status' => 400 ) );
+		}
+
+		$updated = array();
+
+		foreach ( $meta as $meta_key => $meta_value ) {
+			if ( ! is_string( $meta_key ) || '' === $meta_key || 0 === strpos( $meta_key, '_' ) ) {
+				continue;
+			}
+
+			update_post_meta( $post_id, $meta_key, $meta_value );
+			$updated[] = $meta_key;
+		}
+
+		return rest_ensure_response( array( 'updated' => $updated ) );
+	}
+}

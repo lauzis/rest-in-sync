@@ -38,3 +38,19 @@ register_activation_hook( REST_IN_SYNC_FILE, array( 'Rest_In_Sync_Cron', 'activa
 register_deactivation_hook( REST_IN_SYNC_FILE, array( 'Rest_In_Sync_Cron', 'deactivate' ) );
 
 add_action( 'plugins_loaded', array( 'Rest_In_Sync_Plugin', 'instance' ) );
+
+// The plugin's version in the admin footer, beside WordPress's own — the first
+// thing worth knowing about a page misbehaving is which version drew it.
+add_action( 'admin_init', static function () {
+    if ( ! class_exists( '\\Lauzis\\WpPackages\\Admin\\Footer' ) ) {
+        return;
+    }
+
+    \Lauzis\WpPackages\Admin\Footer::show(
+        'rest-in-sync',
+        array(
+            'name'    => 'REST in Sync',
+            'version' => defined( 'REST_IN_SYNC_VERSION' ) ? REST_IN_SYNC_VERSION : '',
+        )
+    );
+} );

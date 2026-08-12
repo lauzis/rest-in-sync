@@ -3,7 +3,7 @@
  * Plugin Name: REST in Sync
  * Plugin URI: https://github.com/lauzis/rest-in-sync
  * Description: A lightweight tool to smoothly sync posts from local environments to live servers via the REST API.
- * Version: 0.4.2
+ * Version: 0.5.0
  * Author: Aivars Lauzis
  * License: MIT
  * Text Domain: rest-in-sync
@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'REST_IN_SYNC_VERSION', '0.4.2' );
+define( 'REST_IN_SYNC_VERSION', '0.5.0' );
 define( 'REST_IN_SYNC_FILE', __FILE__ );
 define( 'REST_IN_SYNC_DIR', plugin_dir_path( __FILE__ ) );
 define( 'REST_IN_SYNC_URL', plugin_dir_url( __FILE__ ) );
@@ -38,6 +38,7 @@ register_activation_hook( REST_IN_SYNC_FILE, array( 'Rest_In_Sync_Cron', 'activa
 register_deactivation_hook( REST_IN_SYNC_FILE, array( 'Rest_In_Sync_Cron', 'deactivate' ) );
 
 add_action( 'plugins_loaded', array( 'Rest_In_Sync_Plugin', 'instance' ) );
+add_action( 'admin_post_rest_in_sync_clear_logs', array( 'Rest_In_Sync_Logs', 'handle_clear' ) );
 
 // The plugin's version in the admin footer, beside WordPress's own — the first
 // thing worth knowing about a page misbehaving is which version drew it.

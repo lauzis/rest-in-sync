@@ -87,24 +87,6 @@ class Rest_In_Sync_Settings {
 			)
 		);
 
-		// The log itself, added to the section the package just declared so the
-		// switch and what it writes share a tab. It carries the same condition
-		// as the switch above: a remote server has no log worth reading here.
-		$settings->callback( 'rest_in_sync_logs_view', array( 'Rest_In_Sync_Logs', 'panel' ) );
-
-		$settings->register(
-			REST_IN_SYNC_DIR . 'config/logs.json',
-			array(
-				'prefix'     => 'rest_in_sync_',
-				'domain'     => 'rest-in-sync',
-				'conditions' => array(
-					'logs_view' => array(
-						array( 'field' => 'is_remote_server', 'value' => 'yes', 'compare' => '!=' ),
-					),
-				),
-			)
-		);
-
 		$settings->render();
 	}
 

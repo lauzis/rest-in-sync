@@ -49,6 +49,30 @@ class Rest_In_Sync_Logs {
 	 * @param array  $additional_objects Key-value context to append as JSON.
 	 * @return bool True on success, false if logging is disabled or write fails.
 	 */
+	/**
+	 * The Slack test button, or null when the package is absent or older than
+	 * the version that added it.
+	 *
+	 * @return \Lauzis\WpPackages\Logs\SlackTester|null
+	 */
+	public static function slack_tester() {
+		static $tester = null;
+
+		if ( null !== $tester ) {
+			return $tester;
+		}
+
+		$logger = self::logger();
+
+		if ( ! $logger || ! class_exists( '\Lauzis\WpPackages\Logs\SlackTester' ) ) {
+			return null;
+		}
+
+		$tester = new \Lauzis\WpPackages\Logs\SlackTester( $logger );
+
+		return $tester;
+	}
+
 	public static function add_log( $action, $message = '', $additional_objects = array() ) {
 		$logger = self::logger();
 

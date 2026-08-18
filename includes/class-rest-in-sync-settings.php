@@ -26,7 +26,20 @@ class Rest_In_Sync_Settings {
 
 	public function __construct() {
 		add_action( 'carbon_fields_register_fields', array( $this, 'register_fields' ) );
+
+		// The Slack test button answers over admin-ajax, which never renders the
+		// settings page, so its endpoint is registered on every admin request.
+		add_action( 'admin_init', array( $this, 'boot_slack_tester' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
+	}
+
+	/** Registers the Slack test endpoint, when the package provides one. */
+	public function boot_slack_tester() {
+		$tester = Rest_In_Sync_Logs::slack_tester();
+
+		if ( $tester ) {
+			$tester->boot();
+		}
 	}
 
 	public function register_fields() {
@@ -68,6 +81,15 @@ class Rest_In_Sync_Settings {
 			)
 		);
 
+		// Draws the "Send a test message" button under the Slack webhook field.
+		// Without the callback the schema's html field renders nothing, so an
+		// older bundled package simply has no button.
+		$tester = Rest_In_Sync_Logs::slack_tester();
+
+		if ( $tester ) {
+			$settings->callback( 'logs_slack_test', array( $tester, 'render' ) );
+		}
+
 		// Logging comes from the shared package. This plugin's established key is
 		// rest_in_sync_enable_logging rather than the component's own name, so it
 		// is mapped rather than migrated. The condition hiding it on a remote
@@ -80,7 +102,13 @@ class Rest_In_Sync_Settings {
 				'domain'     => 'wp-plugin-packages',
 				'map'        => array( 'logs_enabled' => 'enable_logging' ),
 				'conditions' => array(
-					'logs_enabled' => array(
+					'logs_enabled'       => array(
+						array( 'field' => 'is_remote_server', 'value' => 'yes', 'compare' => '!=' ),
+					),
+					// Hidden alongside the logging switch it belongs to: a
+					// remote server is not where this plugin's logging is
+					// configured.
+					'logs_slack_webhook' => array(
 						array( 'field' => 'is_remote_server', 'value' => 'yes', 'compare' => '!=' ),
 					),
 				),

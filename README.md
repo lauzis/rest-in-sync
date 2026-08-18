@@ -271,6 +271,10 @@ vendor/lauzis/wp-plugin-packages/bin/schema-i18n \
 
 ## Changelog
 
+### 0.5.1
+- Added a **Send a test message** button beside the Slack webhook field. It posts to whatever is in the field, saved or not, waits for Slack's answer and reports it — log traffic is fire-and-forget, so a webhook Slack rejects otherwise fails silently.
+- The Slack webhook field is hidden on a remote server, alongside the logging switch it belongs to.
+
 ### 0.5.0
 - Log entries can be sent to **Slack**. A webhook URL and an errors-only/every-entry choice on the Logging settings; errors are posted even with file logging off. See [Logging](#logging).
 - Bundled shared library updated to wp-plugin-packages 1.15.0.

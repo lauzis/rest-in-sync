@@ -1,4 +1,7 @@
-# vendor/ is committed so a downloaded copy of the plugin runs as-is, without
-# a composer install step. Keep it built with --no-dev.
+# vendor/ is built rather than committed: composer install on deploy.
+# The plugin refuses to load without it and says so, rather than fataling.
+# composer.lock stays in git, so that install resolves what was tested.
+/vendor/
+
 node_modules/
 .DS_Store

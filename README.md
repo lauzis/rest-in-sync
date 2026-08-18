@@ -248,6 +248,8 @@ This job only detects and records sync status — pushing content is a manual ac
 
 Logging comes from the shared [wp-plugin-packages](https://github.com/lauzis/wp-plugin-packages) library; `Rest_In_Sync_Logs` is a thin facade over it, so this plugin's log files and settings behave the same as the other plugins'. When "Enable logging" is checked on the Settings page, connection tests, cron sync checks, and remote post lookups are written to daily log files under `wp-content/uploads/rest-in-sync-logs/`. Errors are always written to PHP's `error_log`, and additionally to these files when logging is enabled. Remote lookups log both the attempt (slug, GUID, UUID, and detected WPML language, if any) and, on a miss, how many remote entries were actually scanned — useful for telling apart a genuinely unmatched post from one hidden by a remote-side filter (e.g. WPML's default-language scoping). The Logs page lets you pick a day's log file, view its entries, or clear all log files, confirming deletion with a toast notification.
 
+Entries can also be posted to **Slack**: fill in an incoming webhook URL on the Logging settings and pick whether Slack gets errors only (the default) or every entry. Errors are posted even with file logging off. Sending is fire-and-forget so a sync never waits on Slack, which means a webhook Slack rejects fails quietly; only `https://` URLs are used, since the webhook URL is itself a credential. Every entry means one request per entry against a webhook Slack rate-limits to roughly a message a second — on a site where cron sync checks run every few minutes that is a lot of noise, so errors only is the setting to leave on.
+
 ## Notifications
 
 Actions that need immediate feedback (Test Connection results, clearing logs) show a dismissible toast in the corner of the screen, in addition to the existing inline notices. The toast component comes from the shared [wp-plugin-packages](https://github.com/lauzis/wp-plugin-packages) library, so it behaves identically across these plugins. `assets/js/toast.js` remains as a thin alias, so `window.RestInSyncToast.show(message, type)` still works, where `type` is one of `success`, `error`, `warning`, or `info`.
@@ -266,6 +268,12 @@ Settings fields live in `config/settings.json` rather than in PHP. After changin
 vendor/lauzis/wp-plugin-packages/bin/schema-i18n \
   --domain=rest-in-sync --out=languages/schema-strings.php config/settings.json
 ```
+
+## Changelog
+
+### 0.5.0
+- Log entries can be sent to **Slack**. A webhook URL and an errors-only/every-entry choice on the Logging settings; errors are posted even with file logging off. See [Logging](#logging).
+- Bundled shared library updated to wp-plugin-packages 1.15.0.
 
 ## Requirements
 

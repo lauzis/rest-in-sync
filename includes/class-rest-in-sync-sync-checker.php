@@ -574,9 +574,19 @@ class Rest_In_Sync_Sync_Checker {
 			wp_mkdir_p( REST_IN_SYNC_DIFF_PATH );
 		}
 
-		$this->clear_diff_file( $post );
+		// The id is what a Details link carries, so it has to survive a
+		// re-check. Minting a fresh uuid on every check is what made those
+		// links die as soon as the cron ran again: the id in the url no longer
+		// matched any post, and the page could only report that the link had
+		// expired. Keep the post's id and overwrite the file with the current
+		// diff, so an open Details page stays valid and shows the latest
+		// comparison rather than a snapshot that no longer exists.
+		$diff_id = get_post_meta( $post->ID, self::META_DIFF_ID, true );
 
-		$diff_id = wp_generate_uuid4();
+		if ( ! $diff_id || ! wp_is_uuid( $diff_id ) ) {
+			$diff_id = wp_generate_uuid4();
+		}
+
 		$payload = array(
 			'post_id'    => $post->ID,
 			'uuid'       => get_post_meta( $post->ID, self::META_UUID, true ),

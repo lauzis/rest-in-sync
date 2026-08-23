@@ -185,6 +185,31 @@
           "compare": "!="
         }
       ]
+    },
+    {
+      "id": "diff_cache_intro",
+      "type": "html",
+      "html": "<hr><p>Each out-of-sync post keeps a cached diff on disk, which is what the <strong>Details</strong> page reads. They are rebuilt by the next check, so clearing them costs a re-check and nothing else.</p>",
+      "conditional_logic": [
+        {
+          "field": "is_remote_server",
+          "value": "yes",
+          "compare": "!="
+        }
+      ]
+    },
+    {
+      "id": "diff_cache",
+      "type": "html",
+      "title": "Cached diffs",
+      "html": "@callback:rest_in_sync_diff_cache_field",
+      "conditional_logic": [
+        {
+          "field": "is_remote_server",
+          "value": "yes",
+          "compare": "!="
+        }
+      ]
     }
   ]
 }

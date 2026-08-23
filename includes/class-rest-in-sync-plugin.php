@@ -11,6 +11,7 @@ require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-cron.php';
 require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-field-settings.php';
 require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-sync-checker.php';
 require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-diff-renderer.php';
+require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-diff-cache.php';
 require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-version.php';
 require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-rest-controller.php';
 require_once REST_IN_SYNC_DIR . 'includes/class-rest-in-sync-ajax.php';

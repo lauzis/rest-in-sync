@@ -27,6 +27,10 @@ class Rest_In_Sync_Ajax {
 	/** Nonce action for the Sync page's AJAX requests. */
 	const NONCE_ACTION_SYNC = 'rest_in_sync_sync_page';
 
+	/** Clearing cached diffs is destructive, so it carries its own nonce rather than the test-connection one. */
+	const NONCE_ACTION_DIFF_CACHE = 'rest_in_sync_diff_cache';
+	const ACTION_CLEAR_DIFF_CACHE = 'rest_in_sync_clear_diff_cache';
+
 	public function __construct() {
 		add_action( 'wp_ajax_' . self::ACTION, array( $this, 'handle_test_connection' ) );
 		add_action( 'wp_ajax_' . self::ACTION_PUSH, array( $this, 'handle_push_fields' ) );
@@ -36,6 +40,52 @@ class Rest_In_Sync_Ajax {
 		add_action( 'wp_ajax_' . self::ACTION_IGNORE, array( $this, 'handle_ignore_until_next_check' ) );
 		add_action( 'wp_ajax_' . self::ACTION_UPDATE_FIELD_PATTERN, array( $this, 'handle_update_field_pattern' ) );
 		add_action( 'wp_ajax_' . self::ACTION_DELETE_FIELD_PATTERN, array( $this, 'handle_delete_field_pattern' ) );
+		add_action( 'wp_ajax_' . self::ACTION_CLEAR_DIFF_CACHE, array( $this, 'handle_clear_diff_cache' ) );
+	}
+
+	/**
+	 * Deletes cached diff files: the unused ones by default, everything when
+	 * asked. Answers with the fresh figures so the page can redraw them without
+	 * a reload.
+	 */
+	public function handle_clear_diff_cache() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => __( 'You are not allowed to do this.', 'rest-in-sync' ) ), 403 );
+		}
+
+		check_ajax_referer( self::NONCE_ACTION_DIFF_CACHE, 'nonce' );
+
+		$scope = isset( $_POST['scope'] ) && Rest_In_Sync_Diff_Cache::SCOPE_ALL === $_POST['scope']
+			? Rest_In_Sync_Diff_Cache::SCOPE_ALL
+			: Rest_In_Sync_Diff_Cache::SCOPE_STALE;
+
+		$result = Rest_In_Sync_Diff_Cache::clear( $scope );
+
+		if ( $result['failed'] > 0 ) {
+			wp_send_json_error( array(
+				'message' => sprintf(
+					/* translators: 1: number deleted, 2: number that could not be deleted */
+					__( 'Cleared %1$s file(s), but %2$s could not be deleted — check the permissions on the uploads folder.', 'rest-in-sync' ),
+					number_format_i18n( $result['deleted'] ),
+					number_format_i18n( $result['failed'] )
+				),
+				'summary' => Rest_In_Sync_Diff_Cache::summary( $result['stats'] ),
+				'stats'   => $result['stats'],
+			) );
+		}
+
+		wp_send_json_success( array(
+			'message' => 0 === $result['deleted']
+				? __( 'There was nothing to clear.', 'rest-in-sync' )
+				: sprintf(
+					/* translators: 1: number of files deleted, 2: space reclaimed */
+					__( 'Cleared %1$s file(s), %2$s reclaimed.', 'rest-in-sync' ),
+					number_format_i18n( $result['deleted'] ),
+					size_format( $result['bytes'] )
+				),
+			'summary' => Rest_In_Sync_Diff_Cache::summary( $result['stats'] ),
+			'stats'   => $result['stats'],
+		) );
 	}
 
 	public function handle_test_connection() {

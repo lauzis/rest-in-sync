@@ -68,7 +68,23 @@ Each checked post gets these meta fields:
 | `_rest_in_sync_diff_id` | UUID of the diff JSON file, present only when out of sync. |
 | `_rest_in_sync_checked_version` | Plugin version that performed the check, so an upgrade can invalidate it. |
 
-When a post is out of sync, the differing fields are written as JSON to `wp-content/uploads/rest-in-sync-diffs/{uuid}.json`. The Sync page lists every out-of-sync post (ID, title, post type, last checked); a search box above the list filters it by title (via WP's standard `s` search, matched against `post_title`/`post_content`/`post_excerpt`). Each row's "Details" link opens that post's Sync Details page in a new tab, and its "Check Now" button re-runs `check_single()` for that post over AJAX — updating its row in place, or removing it from the list if it's now in sync — without waiting for the next cron run.
+When a post is out of sync, the differing fields are written as JSON to `wp-content/uploads/rest-in-sync-diffs/{uuid}.json`.
+
+The uuid is stable per post: it is minted the first time a post goes out of
+sync and reused by every later check, which overwrites the file with the
+current diff. That is what keeps a Details link working — the link carries the
+uuid, so a fresh one per check would leave every previously issued link
+pointing at a file and a post-meta value that no longer exist, and the Details
+page could only report the link as expired. The file and the meta pointing at
+it are cleared together once the post is back in sync.
+
+Settings → **Cached diffs** shows how many diff files are on disk and what they
+weigh, and offers two buttons. **Clear unused** deletes files no post points at
+any more, which are pure leftovers. **Clear all** deletes every file and the
+meta that points at them, so nothing is left pointing at a file that is gone;
+Details links stop working until each post is checked again, which rebuilds
+them. A diff is derived data, so either button costs a re-check and never
+information. The Sync page lists every out-of-sync post (ID, title, post type, last checked); a search box above the list filters it by title (via WP's standard `s` search, matched against `post_title`/`post_content`/`post_excerpt`). Each row's "Details" link opens that post's Sync Details page in a new tab, and its "Check Now" button re-runs `check_single()` for that post over AJAX — updating its row in place, or removing it from the list if it's now in sync — without waiting for the next cron run.
 
 The Settings page configures:
 - **Cron Batch Size** — how many posts are checked per cron run (default 10).

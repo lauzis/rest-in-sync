@@ -73,6 +73,10 @@ class Rest_In_Sync_Settings {
 			}
 		);
 
+		// Drawn lazily too: the figures have to be read when the page displays,
+		// not when fields are registered.
+		$settings->callback( 'rest_in_sync_diff_cache_field', array( __CLASS__, 'render_diff_cache_field' ) );
+
 		$settings->register(
 			REST_IN_SYNC_DIR . 'config/settings.json',
 			array(
@@ -132,13 +136,41 @@ class Rest_In_Sync_Settings {
 		);
 
 		wp_localize_script( 'rest-in-sync-admin', 'restInSync', array(
-			'ajaxUrl' => admin_url( 'admin-ajax.php' ),
-			'nonce'   => wp_create_nonce( Rest_In_Sync_Ajax::NONCE_ACTION ),
-			'i18n'    => array(
-				'testing' => __( 'Testing connection…', 'rest-in-sync' ),
-				'error'   => __( 'Something went wrong while testing the connection.', 'rest-in-sync' ),
+			'ajaxUrl'        => admin_url( 'admin-ajax.php' ),
+			'nonce'          => wp_create_nonce( Rest_In_Sync_Ajax::NONCE_ACTION ),
+			'diffCacheNonce' => wp_create_nonce( Rest_In_Sync_Ajax::NONCE_ACTION_DIFF_CACHE ),
+			'i18n'           => array(
+				'testing'         => __( 'Testing connection…', 'rest-in-sync' ),
+				'error'           => __( 'Something went wrong while testing the connection.', 'rest-in-sync' ),
+				'clearing'        => __( 'Clearing…', 'rest-in-sync' ),
+				'clearError'      => __( 'Something went wrong while clearing the cached diffs.', 'rest-in-sync' ),
+				'confirmClearAll' => __( 'Delete every cached diff? Details links stop working until each post is checked again, which rebuilds them. No sync data is lost.', 'rest-in-sync' ),
 			),
 		) );
+	}
+
+	/**
+	 * The cached-diff figures and the buttons that clear them.
+	 *
+	 * A diff is derived data, so this is a maintenance control rather than a
+	 * setting: "unused" are files no post points at any more, which is pure
+	 * leftovers, and "all" costs a re-check per post and nothing else.
+	 *
+	 * @return string
+	 */
+	public static function render_diff_cache_field() {
+		$stats = Rest_In_Sync_Diff_Cache::stats();
+
+		return '<p id="rest-in-sync-diff-cache-summary">' . Rest_In_Sync_Diff_Cache::summary( $stats ) . '</p>'
+			. '<button type="button" id="rest-in-sync-clear-diff-cache-stale" class="button button-secondary"'
+			. ( 0 === $stats['stale_files'] ? ' disabled' : '' ) . '>'
+			. esc_html__( 'Clear unused', 'rest-in-sync' )
+			. '</button> '
+			. '<button type="button" id="rest-in-sync-clear-diff-cache-all" class="button button-secondary"'
+			. ( 0 === $stats['files'] ? ' disabled' : '' ) . '>'
+			. esc_html__( 'Clear all', 'rest-in-sync' )
+			. '</button>'
+			. '<span id="rest-in-sync-clear-diff-cache-spinner" class="spinner" style="float:none;"></span>';
 	}
 
 	/** Whether this site is configured as the remote/target side of a sync pair — see the field's help text for what that disables. */

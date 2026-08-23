@@ -2,6 +2,8 @@
 	'use strict';
 
 	$( function () {
+		bindDiffCache();
+
 		var $button   = $( '#rest-in-sync-test-connection' );
 		var $spinner  = $( '#rest-in-sync-test-connection-spinner' );
 		var $result   = $( '#rest-in-sync-test-connection-result' );
@@ -34,6 +36,62 @@
 				$spinner.removeClass( 'is-active' );
 			} );
 		} );
+
+		// Clearing cached diffs. The response carries the fresh figures, so the
+		// summary is redrawn from it rather than by reloading the page.
+		function bindDiffCache() {
+			var $summary = $( '#rest-in-sync-diff-cache-summary' );
+			var $stale   = $( '#rest-in-sync-clear-diff-cache-stale' );
+			var $all     = $( '#rest-in-sync-clear-diff-cache-all' );
+			var $wait    = $( '#rest-in-sync-clear-diff-cache-spinner' );
+
+			if ( ! $summary.length ) {
+				return;
+			}
+
+			$stale.on( 'click', function () {
+				clear( 'stale' );
+			} );
+
+			$all.on( 'click', function () {
+				if ( window.confirm( restInSync.i18n.confirmClearAll ) ) {
+					clear( 'all' );
+				}
+			} );
+
+			function clear( scope ) {
+				$stale.prop( 'disabled', true );
+				$all.prop( 'disabled', true );
+				$wait.addClass( 'is-active' );
+
+				$.post( restInSync.ajaxUrl, {
+					action: 'rest_in_sync_clear_diff_cache',
+					nonce: restInSync.diffCacheNonce,
+					scope: scope
+				} ).done( function ( response ) {
+					var data    = response && response.data ? response.data : {};
+					var success = response && response.success;
+
+					if ( data.summary ) {
+						$summary.html( data.summary );
+					}
+
+					// Driven by the figures rather than by reading the summary
+					// back: nothing left to clear leaves nothing to click, in
+					// any language.
+					if ( data.stats ) {
+						$stale.prop( 'disabled', ! data.stats.stale_files );
+						$all.prop( 'disabled', ! data.stats.files );
+					}
+
+					showToast( data.message || restInSync.i18n.clearError, success ? 'success' : 'error' );
+				} ).fail( function () {
+					showToast( restInSync.i18n.clearError, 'error' );
+				} ).always( function () {
+					$wait.removeClass( 'is-active' );
+				} );
+			}
+		}
 
 		function showToast( message, type ) {
 			if ( window.RestInSyncToast ) {

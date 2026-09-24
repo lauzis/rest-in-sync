@@ -13,6 +13,7 @@ class Rest_In_Sync_Settings {
 	const OPTION_USERNAME              = 'rest_in_sync_username';
 	const OPTION_APP_PASSWORD          = 'rest_in_sync_app_password';
 	const OPTION_ENABLE_LOGGING        = 'rest_in_sync_enable_logging';
+	const OPTION_READ_ONLY             = 'rest_in_sync_read_only';
 	const OPTION_POST_TYPES            = 'rest_in_sync_post_types_to_sync';
 	const OPTION_CRON_BATCH_SIZE       = 'rest_in_sync_cron_batch_size';
 	const OPTION_CRON_INTERVAL         = 'rest_in_sync_cron_interval';
@@ -176,6 +177,23 @@ class Rest_In_Sync_Settings {
 	/** Whether this site is configured as the remote/target side of a sync pair — see the field's help text for what that disables. */
 	public static function is_remote_server() {
 		return (bool) self::get_option( self::OPTION_IS_REMOTE_SERVER );
+	}
+
+	/**
+	 * Whether pushing content to the remote site is refused.
+	 *
+	 * @return bool
+	 */
+	public static function is_read_only() {
+		// Carbon Fields applies the field's own default (on) when nothing is
+		// stored, so an existing install stays read-only until an admin turns it
+		// off. Without Carbon Fields there is no stored answer at all, so that
+		// counts as on too.
+		if ( ! function_exists( 'carbon_get_theme_option' ) ) {
+			return true;
+		}
+
+		return (bool) self::get_option( self::OPTION_READ_ONLY );
 	}
 
 	public static function get_site_url() {

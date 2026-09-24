@@ -125,6 +125,15 @@ class Rest_In_Sync_Sync_Checker {
 	 * @return true|WP_Error
 	 */
 	public function push_to_remote( WP_Post $post, array $selected_keys ) {
+		// Checked first, before the version probe, so a read-only site sends
+		// nothing to the remote at all. Like the version check, refusing here
+		// covers every caller rather than just the button.
+		if ( Rest_In_Sync_Settings::is_read_only() ) {
+			Rest_In_Sync_Logs::add_error( 'push', 'Push blocked: read-only mode is enabled.', array( 'post_id' => $post->ID ) );
+
+			return new WP_Error( 'rest_in_sync_read_only', __( 'Read-only mode is enabled. Disable it in Settings to push changes.', 'rest-in-sync' ) );
+		}
+
 		// Both ends move meta through this plugin's own REST route, so a version
 		// mismatch means the other end may store or accept fields differently.
 		// Refusing here covers the AJAX handler, the cron and any future caller,

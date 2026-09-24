@@ -12,7 +12,7 @@ The plugin registers a top-level **REST in Sync** menu with the following pages:
 | Help | Explains how to set up the connection to a live site (including remote-side requirements), the cron sync check, and logging. |
 | Logs | Shows daily log files of sync and connection test activity, with a file selector and a "Clear all logs" button. |
 | Field Settings | Lists every field/meta key currently flagged "Don't sync by default" or "Don't use in diff" in one place, with the same toggle buttons as the Details page, plus wildcard pattern rules for excluding a whole family of meta keys at once. |
-| Settings | Configures the remote site connection, which post types to sync, the cron schedule, and logging, with a "Test Connection" button. The fields are declared in `config/settings.json` and rendered by Carbon Fields through the shared [wp-plugin-packages](https://github.com/lauzis/wp-plugin-packages) settings component. |
+| Settings | Configures read-only mode, the remote site connection, which post types to sync, the cron schedule, and logging, with a "Test Connection" button. The fields are declared in `config/settings.json` and rendered by Carbon Fields through the shared [wp-plugin-packages](https://github.com/lauzis/wp-plugin-packages) settings component. |
 
 ## Two-way installs and the "remote server" setting
 
@@ -23,6 +23,14 @@ Since REST in Sync's own REST routes (the UUID-linking meta and the all-meta rou
 - Its `/wp-json/rest-in-sync/v1/meta/{id}` route (see "Sync Details page" below, which covers what this route is for) keeps working regardless — that's what makes it useful as a remote target in the first place.
 
 Leave it unchecked on the site that's actually driving the sync (the one with Site URL/Username/Application Password filled in and cron enabled). Checking it hides every other Settings field (connection details, logging, post types, cron) via Carbon Fields conditional logic, since none of them apply to a pure remote target, and shows a short note explaining why.
+
+## Read-only mode
+
+The Settings page's **Read-only mode** checkbox is **on by default**, including on existing installs that have never saved it — an admin has to turn it off before this site will write anything to the remote.
+
+While it's on, **Push to Remote** (the bulk button and each row's **Push**) is refused inside `push_to_remote()` before any request leaves this site — ahead of even the version probe — and the Sync Details page shows the refusal as an error toast. The blocked attempt is logged. The button itself stays enabled for now.
+
+Nothing that only reads from the remote is affected: the cron sync check, **Check Now**/**Resync Now**, **Test Connection**, and **Pull from Remote** (which writes to this site, not the remote) all keep working. The field is hidden when "This is the remote server" is checked, since a remote server never pushes anyway.
 
 ## Connecting to a live site
 
@@ -193,6 +201,8 @@ sequenceDiagram
     participant R as Remote site
 
     U->>L: Push selected fields
+    L->>L: read-only mode off?
+    Note over L: refused here if on — nothing<br/>is sent to the remote
     L->>L: versions match?
     Note over L: refused here if not — this<br/>guard also covers cron and AJAX
     L->>L: find the twin post
@@ -250,7 +260,7 @@ Below the URLs, **Edit** and **Revisions** buttons link straight into each site'
 
 Next to it, **Ignore Until Next Sync** (also available per-row on the Sync page) sets a one-time `_rest_in_sync_ignored` flag that hides the post from the out-of-sync list without changing its actual status — unlike the permanent, global "Don't use in diff" field setting, this is a per-post, temporary snooze. The very next check (cron or manual) for that post clears the flag automatically regardless of outcome, so a post that's still genuinely out of sync reappears rather than staying hidden forever. From the Details page, since there's nothing else to see here once a post is ignored, a successful click redirects back to the Sync page so you can see it's actually gone from the list.
 
-**Push to Remote** sends the checked fields (and any selected meta as a `meta` object) as an authenticated REST request to the remote post, then re-runs the sync check for that post so its status and diff reflect the new state.
+**Push to Remote** sends the checked fields (and any selected meta as a `meta` object) as an authenticated REST request to the remote post, then re-runs the sync check for that post so its status and diff reflect the new state. While **Read-only mode** is on (the default — see "Read-only mode" above), it is refused with an error toast and nothing is sent.
 
 **Pull from Remote** is the mirror image: it takes the same checked fields/meta but writes the remote's values onto this local post instead, via `wp_update_post()`/`update_post_meta()` — the home-URL rewrite (see below) runs in the opposite direction so remote links don't leak into local content. Both actions show a confirmation dialog before proceeding, since either one overwrites real content, and both reload the page on success so the comparison reflects the new state. The result is shown as a toast notification, consistent with Test Connection's UX.
 

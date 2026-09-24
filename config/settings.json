@@ -31,6 +31,20 @@
       ]
     },
     {
+      "id": "read_only",
+      "type": "checkbox",
+      "title": "Read-only mode",
+      "default_value": true,
+      "help_text": "Prevents pushing content to the remote site. Sync checks, Test Connection and Pull from Remote keep working, since none of them write to the remote. Uncheck this to allow Push to Remote.",
+      "conditional_logic": [
+        {
+          "field": "is_remote_server",
+          "value": "yes",
+          "compare": "!="
+        }
+      ]
+    },
+    {
       "id": "site_url",
       "type": "text",
       "title": "Site URL",
